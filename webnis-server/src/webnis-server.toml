@@ -1,0 +1,38 @@
+[server]
+  listen = [ "0.0.0.0:8245", "[::]:3333" ]
+
+[[domain]]
+  name = "xs4all.nl"
+  db_dir = "/var/yp/xs4all.nl"
+  maps = [ "passwd", "group", "gidlist" ]
+  default = true
+
+[[domain]]
+  name = "shell.xs4all.nl"
+  db_dir = "/var/yp/shell.xs4all.nl"
+  maps = [ "passwd", "group" ]
+
+[map.passwd.byname]
+  key = "name"
+  key_alias = { user = "name" }
+  map_format = "passwd"
+  map_type   = "gdbm"
+  map_file   = "passwd.byname"
+
+[map.passwd.byuid]
+  key = "uid"
+  map_format = "passwd"
+  map_type   = "gdbm"
+  map_file = "passwd.byuid"
+
+[map.group]
+  keys = [ "name", "gid" ]
+  map_type = "json"
+  map_file = "group"
+
+[map.gidlist]
+  [map.gidlist.json]
+  key = "name"
+  map_type = "json"
+  map_file = "gidlist"
+

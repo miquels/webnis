@@ -1,0 +1,3 @@
+[workspace]
+members = ["libnss-webnis", "libpam-webnis", "webnis-client", "webnis-server" ]
+

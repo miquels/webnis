@@ -1,0 +1,12 @@
+[package]
+name = "libpam-webnis"
+version = "0.1.0"
+authors = ["mikevs <mikevs@xs4all.net>"]
+
+[dependencies]
+libc = "0.2"
+
+[lib]
+name = "pam_webnis"
+crate-type = [ "cdylib", "rlib" ]
+
