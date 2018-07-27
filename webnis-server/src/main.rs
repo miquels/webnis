@@ -1,5 +1,6 @@
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate serde_json;
+#[macro_use] extern crate log;
 extern crate serde;
 extern crate hyper;
 extern crate env_logger;
@@ -154,6 +155,8 @@ impl Service for Webnis {
     type Future = BoxedFuture;
 
     fn call(&mut self, mut req: Request<<Self as Service>::ReqBody>) -> BoxedFuture {
+
+        debug!("{}", req.uri());
 
         // see if we know this route.
         let mat = match self.inner.matcher.match_req(&mut req) {
