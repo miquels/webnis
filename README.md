@@ -17,11 +17,11 @@ It can in fact serve existing NIS maps from /var/yp/<domain>.
 
 ## libnss-webnis
 
-A NSS module that does passwd/group lookups via webnis (using webnis-client).
+A NSS module that does passwd/group lookups via webnis (using webnis-bind).
 
 ## libpam-webnis
 
-A PAM module that authenticates via webnis (using webnis-client).
+A PAM module that authenticates via webnis (using webnis-bind).
 
 ## webnis-bind
 

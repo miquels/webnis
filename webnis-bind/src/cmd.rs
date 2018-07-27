@@ -1,5 +1,4 @@
 
-use std;
 use std::io;
 use std::error::Error;
 
@@ -11,7 +10,9 @@ use hyper_tls::HttpsConnector;
 use hyper::StatusCode;
 
 use futures::prelude::*;
-use futures::future::{self, FutureResult};
+use futures::future;
+
+use super::Context;
 
 pub(crate) enum Cmd {
     GetPwNam,
@@ -42,25 +43,39 @@ struct ResponseError {
     data:       Option<String>,
 }
 
-pub(crate) fn process(line: String) -> Box<Future<Item=String, Error=io::Error> + Send> {
+pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Error=io::Error> + Send> {
     match Request::parse(&line) {
-        Ok(req) => Box::new(process2(req)),
+        Ok(req) => Box::new(process2(ctx, req)),
         Err(e) => Box::new(future::ok(response_error(400, &e))),
     }
 }
 
-fn process2(request: Request) -> impl Future<Item=String, Error=io::Error> {
+fn build_uri(cfg: &super::config::Config, map: &str, key: &str, val: &str) -> hyper::Uri {
+    let host = &cfg.servers[0];
+    let scheme = if host == "localhost" || host.starts_with("localhost:") {
+        "http"
+    } else {
+        "https"
+    };
+    let u = if let Some(ref dom) = cfg.domain {
+        format!("{}://{}/webnis/{}/{}", scheme, host, dom, map)
+    } else {
+        format!("{}://{}/webnis/{}", scheme, host, map)
+    };
+    let url = Url::parse_with_params(&u, &[(key, val)]).unwrap();
+    url.as_str().parse::<hyper::Uri>().unwrap()
+}
 
-    let (endpoint, param) = match request.cmd {
+fn process2(ctx: Context, request: Request) -> impl Future<Item=String, Error=io::Error> {
+
+    let (map, param) = match request.cmd {
         Cmd::GetPwNam => ("passwd", "name"),
         Cmd::GetPwUid => ("passwd", "uid"),
         Cmd::GetGrNam => ("group", "name"),
         Cmd::GetGrGid => ("group", "gid"),
         Cmd::GetGidList => ("gidlist", "name"),
     };
-    let base = "https://www.langeraar.net/webnis/".to_owned();
-    let url = Url::parse_with_params(&(base + endpoint), &[(param, request.args[0])]).unwrap();
-    let uri = url.as_str().parse::<hyper::Uri>().unwrap();
+    let uri = build_uri(&ctx.inner.config, map, param, &request.args[0]);
 
     let https = HttpsConnector::new(4).unwrap();
     let client = Client::builder().build::<_, hyper::Body>(https);
@@ -68,15 +83,17 @@ fn process2(request: Request) -> impl Future<Item=String, Error=io::Error> {
     client.get(uri)
     //.map(|_| "hoi".to_string())
     //.map_err(|_| io::Error::new(io::ErrorKind::Other, "oh no!"))
-    .map_err(|_| response_error(400, "GET error"))
+    .map_err(|e| response_error(400, &format!("GET error: {}", e)))
     .and_then(|res| {
         // see if response is what we expected
-        println!("Response: {}", res.status());
-        println!("Headers: {:#?}", res.headers());
-
-        if res.status() != StatusCode::OK {
-            let code = res.status().as_u16() as i64;
-            future::err(response_error(code, "HTTP error"))
+        let is_json = res.headers().get("content-type").map(|h| h == "application/json").unwrap_or(false);
+        if !is_json {
+            if res.status().is_success() {
+                future::err(response_error(416, "expected application/json"))
+            } else {
+                let code = res.status().as_u16() as i64;
+                future::err(response_error(code, "HTTP error"))
+            }
         } else {
             future::ok(res)
         }
@@ -103,7 +120,6 @@ fn process2(request: Request) -> impl Future<Item=String, Error=io::Error> {
 
 impl<'a> Request<'a> {
     fn parse(input: &'a str) -> Result<Request<'a>, String> {
-        println!("Request: parse {}", input);
         let mut parts = input.splitn(3, " ");
 	    let c = match parts.next() {
 		    None => return Err("NO".to_owned()),

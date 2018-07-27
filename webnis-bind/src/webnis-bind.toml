@@ -1,0 +1,4 @@
+#domain = "webnis"
+password = "webnis"
+server = "localhost:3333"
+#servers = [ "auth1.xs4all.nl", "auth2.xs4all.nl" ]
