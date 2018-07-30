@@ -1,12 +1,12 @@
 
 use std::io;
-use std::time::Duration;
+use std::time::{Instant,Duration};
 
 use url::Url;
 use hyper;
-use hyper::Client;
+use hyper::client::HttpConnector;
 use hyper_tls::HttpsConnector;
-
+use tokio::timer::Delay;
 use futures::prelude::*;
 use futures::future;
 
@@ -28,10 +28,21 @@ struct Request<'a> {
 }
 
 pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Error=io::Error> + Send> {
-    match Request::parse(&line) {
-        Ok(req) => Box::new(process2(ctx, req)),
-        Err(e) => Box::new(future::ok(Response::error(400, &e))),
-    }
+    let request = match Request::parse(&line) {
+        Ok(req) => req,
+        Err(e) => return Box::new(future::ok(Response::error(400, &e))),
+    };
+
+    let (map, param) = match request.cmd {
+        Cmd::GetPwNam => ("passwd", "name"),
+        Cmd::GetPwUid => ("passwd", "uid"),
+        Cmd::GetGrNam => ("group", "name"),
+        Cmd::GetGrGid => ("group", "gid"),
+        Cmd::GetGidList => ("gidlist", "name"),
+    };
+    let uri = build_uri(&ctx.config, map, param, &request.args[0]);
+
+    get_with_retries(&ctx, uri, 0)
 }
 
 fn build_uri(cfg: &super::config::Config, map: &str, key: &str, val: &str) -> hyper::Uri {
@@ -50,34 +61,43 @@ fn build_uri(cfg: &super::config::Config, map: &str, key: &str, val: &str) -> hy
     url.as_str().parse::<hyper::Uri>().unwrap()
 }
 
-fn process2(ctx: Context, request: Request) -> impl Future<Item=String, Error=io::Error> {
+// build a new hyper::Client.
+fn new_client(config: &super::config::Config) -> hyper::Client<HttpsConnector<HttpConnector>> {
+    let http2_only = config.http2_only.unwrap_or(false);
+    let https = HttpsConnector::new(4).unwrap();
+    hyper::Client::builder()
+                .http2_only(http2_only)
+                .keep_alive(true)
+                .keep_alive_timeout(Duration::new(30, 0))
+                .build::<_, hyper::Body>(https)
+}
 
-    let (map, param) = match request.cmd {
-        Cmd::GetPwNam => ("passwd", "name"),
-        Cmd::GetPwUid => ("passwd", "uid"),
-        Cmd::GetGrNam => ("group", "name"),
-        Cmd::GetGrGid => ("group", "gid"),
-        Cmd::GetGidList => ("gidlist", "name"),
-    };
-    let uri = build_uri(&ctx.config, map, param, &request.args[0]);
+// This function can call itself recursively to keep on
+// generating futures so as to retry.
+//
+// Here we do not just retry, but for every retry we invalidate the
+// hyper::Client and instantiate a new one. This is needed to
+// cycle between different webnis servers.
+//
+// It also guards against bugs in hyper::Client or its dependencies
+// that can get a hyper::Client stuck, see:
+//
+// https://github.com/hyperium/hyper/issues/1422
+// https://github.com/rust-lang/rust/issues/47955
+//
+fn get_with_retries(ctx: &Context, uri: hyper::Uri, n_retries: u32) -> Box<Future<Item=String, Error=io::Error> + Send> {
 
-    // below is a whole bunch of retry machinery. Especially important is
-    // to throw away the current hyper::Client and replace it with
-    // a new and fresh one, because it might be stuck.
-    //
-    // This documents it being stuck in DNS:
-    // https://github.com/hyperium/hyper/issues/1422
-    // https://github.com/rust-lang/rust/issues/47955
-
-    let lock_clone = ctx.client.clone();
+    let ctx_clone = ctx.clone();
+    let uri_clone = uri.clone();
 
     let mut guard = ctx.client.lock().unwrap();
-    let client = &*guard.get_or_insert_with(|| super::new_client(true));
+    let client = &*guard.get_or_insert_with(|| new_client(&ctx.config));
 
-    client.get(uri)
+    let resp = client.get(uri)
     .map_err(|e| {
         // something went very wrong. mark it with code 550 so that at the
         // end of the future chain we can detect it and retry.
+        debug!("client: got error, need retry: {}", e);
         Response::error(550, &format!("GET error: {}", e))
     })
     .and_then(|res| {
@@ -100,13 +120,34 @@ fn process2(ctx: Context, request: Request) -> impl Future<Item=String, Error=io
         .concat2()
         .map_err(|_| Response::error(400, "GET body error"))
     })
-    .then(|res| {
+    .then(move |res| {
         let body = match res {
             Ok(body) => body,
-            Err(e) => return future::ok(e),
+            Err(e) => {
+                if e.starts_with("550 ") && n_retries < 8 {
+                    debug!("scheduling retry {} because of {}", n_retries + 1, e);
+					// invalidate current hyper::Client.
+                    {
+    				    let mut guard = ctx_clone.client.lock().unwrap();
+    				    guard.take();
+                    }
+					// and retry.
+                    return get_with_retries(&ctx_clone, uri_clone, n_retries + 1);
+                } else {
+                    return Box::new(future::ok(e));
+                }
+            },
         };
-        future::ok(Response::transform(body))
-    })
+        Box::new(future::ok(Response::transform(body)))
+    });
+
+    if n_retries > 0 {
+        debug!("n_retries > 1, delay and then retry");
+        let when = Instant::now() + Duration::from_millis(250);
+        Box::new(Delay::new(when).then(move |_| resp))
+    } else {
+        Box::new(resp)
+    }
 }
 
 // over-engineered way to lowercase a string without allocating.

@@ -1,5 +1,6 @@
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate clap;
+#[macro_use] extern crate log;
 extern crate bytes;
 extern crate serde;
 extern crate serde_json;
@@ -29,9 +30,9 @@ use std::time::Duration;
 use futures::prelude::*;
 use tokio_uds::UnixListener;
 use tokio_codec::Decoder;
+use tk_listen::ListenExt;
 use hyper::client::HttpConnector;
 use hyper_tls::HttpsConnector;
-use tk_listen::ListenExt;
 
 use codec::LinesCodec;
 
@@ -42,15 +43,6 @@ pub struct Context {
     config:      Arc<config::Config>,
     // a client that we can replace.
     client:     Arc<Mutex<Option<hyper::Client<HttpsConnector<HttpConnector>>>>>,
-}
-
-pub fn new_client(http2_only: bool) -> hyper::Client<HttpsConnector<HttpConnector>> {
-    let https = HttpsConnector::new(4).unwrap();
-    hyper::Client::builder()
-                .http2_only(http2_only)
-                .keep_alive(true)
-                .keep_alive_timeout(Duration::new(30, 0))
-                .build::<_, hyper::Body>(https)
 }
 
 fn main() {
@@ -72,14 +64,12 @@ fn main() {
             exit(1);
         }
     };
-
     let http2_only = config.http2_only.unwrap_or(false);
     let mut concurrency = config.concurrency.unwrap_or(32);
     if http2_only && concurrency < 100 {
         concurrency = 100;
     }
 
-    //let client = new_client(http2_only);
     let ctx = Context{
         config: Arc::new(config),
 		client: Arc::new(Mutex::new(None)),
