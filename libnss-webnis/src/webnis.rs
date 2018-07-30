@@ -7,7 +7,7 @@ use std::io::Write;
 
 use super::nss::{Passwd,Group,uid_t,gid_t,NssResult,NssError};
 
-static SOCKADDR: &'static str = "webnis-bind.sock";
+static SOCKADDR: &'static str = "/var/run/webnis-bind.sock";
 
 pub struct Webnis;
 
