@@ -12,10 +12,12 @@ extern crate hyper_tls;
 extern crate url;
 extern crate env_logger;
 extern crate toml;
+extern crate libc;
 
 mod cmd;
 mod config;
 mod codec;
+mod response;
 
 use std::fs;
 use std::io;

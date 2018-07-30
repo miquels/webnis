@@ -1,18 +1,16 @@
 
 use std::io;
-use std::error::Error;
 
-use serde_json;
 use url::Url;
 use hyper;
 use hyper::Client;
 use hyper_tls::HttpsConnector;
-use hyper::StatusCode;
 
 use futures::prelude::*;
 use futures::future;
 
 use super::Context;
+use super::response::Response;
 
 pub(crate) enum Cmd {
     GetPwNam,
@@ -28,25 +26,10 @@ struct Request<'a> {
     args:   Vec<&'a str>,
 }
 
-#[derive(Serialize,Deserialize)]
-#[serde(untagged)]
-enum Response {
-    Success { result: serde_json::Value },
-    Error { error: ResponseError },
-}
-
-#[derive(Serialize,Deserialize)]
-struct ResponseError {
-    code:       i64,
-    message:    String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data:       Option<String>,
-}
-
 pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Error=io::Error> + Send> {
     match Request::parse(&line) {
         Ok(req) => Box::new(process2(ctx, req)),
-        Err(e) => Box::new(future::ok(response_error(400, &e))),
+        Err(e) => Box::new(future::ok(Response::error(400, &e))),
     }
 }
 
@@ -83,16 +66,16 @@ fn process2(ctx: Context, request: Request) -> impl Future<Item=String, Error=io
     client.get(uri)
     //.map(|_| "hoi".to_string())
     //.map_err(|_| io::Error::new(io::ErrorKind::Other, "oh no!"))
-    .map_err(|e| response_error(400, &format!("GET error: {}", e)))
+    .map_err(|e| Response::error(400, &format!("GET error: {}", e)))
     .and_then(|res| {
         // see if response is what we expected
         let is_json = res.headers().get("content-type").map(|h| h == "application/json").unwrap_or(false);
         if !is_json {
             if res.status().is_success() {
-                future::err(response_error(416, "expected application/json"))
+                future::err(Response::error(416, "expected application/json"))
             } else {
                 let code = res.status().as_u16() as i64;
-                future::err(response_error(code, "HTTP error"))
+                future::err(Response::error(code, "HTTP error"))
             }
         } else {
             future::ok(res)
@@ -102,28 +85,41 @@ fn process2(ctx: Context, request: Request) -> impl Future<Item=String, Error=io
         res
         .into_body()
         .concat2()
-        .map_err(|_| response_error(400, "GET body error"))
+        .map_err(|_| Response::error(400, "GET body error"))
     })
     .then(|res| {
         let body = match res {
             Ok(body) => body,
             Err(e) => return future::ok(e),
         };
-        let data = match serde_json::from_slice::<Response>(&body) {
-            Ok(resp) => resp.serialize(),
-            Err(e) => response_error(400, e.description()),
-        };
-        future::ok(data)
+        future::ok(Response::transform(body))
     })
     //.map_err(|_: i32| io::Error::new(io::ErrorKind::Other, "oh no!"))
+}
+
+// over-engineered way to lowercase a string without allocating.
+fn tolower<'a>(s: &'a str, buf: &'a mut [u8]) -> &'a str {
+    let b = s.as_bytes();
+    if b.len() > buf.len() {
+        return s;
+    }
+    for idx in 0 .. b.len() {
+        let c = b[idx];
+        buf[idx] = if c >= 65 && c <= 90 { c + 32 } else { c };
+    }
+    match ::std::str::from_utf8(&buf[0..b.len()]) {
+        Ok(s) => s,
+        Err(_) => s,
+    }
 }
 
 impl<'a> Request<'a> {
     fn parse(input: &'a str) -> Result<Request<'a>, String> {
         let mut parts = input.splitn(3, " ");
+        let mut buf = [0u8; 16];
 	    let c = match parts.next() {
 		    None => return Err("NO".to_owned()),
-            Some(c) => c,
+            Some(c) => tolower(c, &mut buf),
         };
         let args = parts.collect::<Vec<_>>();
         let (cmd, nargs) = match c {
@@ -142,23 +138,3 @@ impl<'a> Request<'a> {
     }
 }
 
-impl Response {
-    fn serialize(&self) -> String {
-        match serde_json::to_string(&*self) {
-            Ok(v) => v,
-            Err(_) => {
-                r#"{ "error": { "code": 500, "message": "json::to_string error" } }"#.to_owned()
-            }
-        }
-    }
-}
-
-fn response_error(code: i64, message: &str) -> String {
-    serde_json::to_string(&Response::Error{
-        error: ResponseError{
-            code:       code,
-            message:    message.to_owned(),
-            data:       None,
-        }
-    }).unwrap()
-}
