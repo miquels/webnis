@@ -13,6 +13,7 @@ extern crate url;
 extern crate env_logger;
 extern crate toml;
 extern crate libc;
+extern crate tk_listen;
 
 mod cmd;
 mod config;
@@ -22,22 +23,34 @@ mod response;
 use std::fs;
 use std::io;
 use std::process::exit;
-use std::sync::Arc;
+use std::sync::{Arc,Mutex};
+use std::time::Duration;
 
 use futures::prelude::*;
 use tokio_uds::UnixListener;
 use tokio_codec::Decoder;
+use hyper::client::HttpConnector;
+use hyper_tls::HttpsConnector;
+use tk_listen::ListenExt;
 
 use codec::LinesCodec;
 
-#[derive(Debug,Clone)]
+#[derive(Clone)]
+//#[derive(Debug,Clone)]
 pub struct Context {
-    inner:      Arc<InnerContext>,
+    // config that we can clone
+    config:      Arc<config::Config>,
+    // a client that we can replace.
+    client:     Arc<Mutex<Option<hyper::Client<HttpsConnector<HttpConnector>>>>>,
 }
 
-#[derive(Debug,Clone)]
-pub struct InnerContext {
-    config:     config::Config,
+pub fn new_client(http2_only: bool) -> hyper::Client<HttpsConnector<HttpConnector>> {
+    let https = HttpsConnector::new(4).unwrap();
+    hyper::Client::builder()
+                .http2_only(http2_only)
+                .keep_alive(true)
+                .keep_alive_timeout(Duration::new(30, 0))
+                .build::<_, hyper::Body>(https)
 }
 
 fn main() {
@@ -59,10 +72,17 @@ fn main() {
             exit(1);
         }
     };
+
+    let http2_only = config.http2_only.unwrap_or(false);
+    let mut concurrency = config.concurrency.unwrap_or(32);
+    if http2_only && concurrency < 100 {
+        concurrency = 100;
+    }
+
+    //let client = new_client(http2_only);
     let ctx = Context{
-        inner: Arc::new(InnerContext{
-            config: config,
-        }),
+        config: Arc::new(config),
+		client: Arc::new(Mutex::new(None)),
     };
 
 	let listener = match UnixListener::bind(&listen) {
@@ -75,17 +95,19 @@ fn main() {
     }.expect("failed to bind");
     println!("Listening on: {}", listen);
 
-    let conns = listener.incoming().map_err(|e| eprintln!("error = {:?}", e));
-    let server = conns.for_each(move |socket| {
-        let (writer, reader) = LinesCodec::new(ctx.clone()).framed(socket).split();
-        let responses = reader.and_then(|(ctx, line)| cmd::process(ctx, line));
-        let session = writer.send_all(responses).map_err(|_| ()).map(|_| ());
-        tokio::spawn(session);
-        Ok(())
-    })
-    .map_err(|err| {
-        eprintln!("server error {:?}", err);
-    });
+    let server = listener.incoming()
+        .map_err(|e| { eprintln!("accept error = {:?}", e); e })
+        .sleep_on_error(Duration::from_millis(100))
+        //.map_err(|_| ())
+        .map(move |socket| {
+            let (writer, reader) = LinesCodec::new(ctx.clone()).framed(socket).split();
+            let responses = reader.and_then(|(ctx, line)| cmd::process(ctx, line));
+            let session = writer.send_all(responses).map_err(|_| ()).map(|_| ());
+            session.map_err(|_| ())
+        })
+        // .listen(concurrency) from tk-listen is the same as this:
+        //.buffer_unordered(concurrency).for_each(|()| Ok(()));
+        .listen(concurrency);
 
     tokio::run(server);
     exit(1);

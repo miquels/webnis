@@ -7,11 +7,13 @@ use toml;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
-    pub domain:     Option<String>,
-    pub password:   String,
-    pub server:     Option<String>,
+    pub domain:         Option<String>,
+    pub password:       String,
+    pub server:         Option<String>,
     #[serde(default)]
-    pub servers:    Vec<String>,
+    pub servers:        Vec<String>,
+    pub http2_only:     Option<bool>,
+    pub concurrency:    Option<usize>,
 }
 
 pub fn read(name: &str) -> io::Result<Config> {

@@ -1,4 +1,18 @@
-#domain = "webnis"
-password = "webnis"
-server = "localhost:3333"
-#servers = [ "auth1.xs4all.nl", "auth2.xs4all.nl" ]
+# The domain to use. If not set, uses the default domain
+#domain     = "webnis"
+
+# Password for this domain.
+password   = "webnis"
+
+# Server to use. Users servers = [ ... ] for multiple servers.
+server     = "localhost:3333"
+#servers    = [ "auth1.xs4all.nl", "auth2.xs4all.nl" ]
+
+# Max outstanding HTTP requests to the  server. 32 is the default.
+concurrency = 500
+
+# Force HTTP/2. Recommended. This always uses one TCP connection to the
+# server, regardless of the concurrency. If this is set, "concurrency"
+# is set to 100 minimal.
+#http2_only = true
+

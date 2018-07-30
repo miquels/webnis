@@ -1,5 +1,6 @@
 
 use std::io;
+use std::time::Duration;
 
 use url::Url;
 use hyper;
@@ -58,15 +59,27 @@ fn process2(ctx: Context, request: Request) -> impl Future<Item=String, Error=io
         Cmd::GetGrGid => ("group", "gid"),
         Cmd::GetGidList => ("gidlist", "name"),
     };
-    let uri = build_uri(&ctx.inner.config, map, param, &request.args[0]);
+    let uri = build_uri(&ctx.config, map, param, &request.args[0]);
 
-    let https = HttpsConnector::new(4).unwrap();
-    let client = Client::builder().build::<_, hyper::Body>(https);
+    // below is a whole bunch of retry machinery. Especially important is
+    // to throw away the current hyper::Client and replace it with
+    // a new and fresh one, because it might be stuck.
+    //
+    // This documents it being stuck in DNS:
+    // https://github.com/hyperium/hyper/issues/1422
+    // https://github.com/rust-lang/rust/issues/47955
+
+    let lock_clone = ctx.client.clone();
+
+    let mut guard = ctx.client.lock().unwrap();
+    let client = &*guard.get_or_insert_with(|| super::new_client(true));
 
     client.get(uri)
-    //.map(|_| "hoi".to_string())
-    //.map_err(|_| io::Error::new(io::ErrorKind::Other, "oh no!"))
-    .map_err(|e| Response::error(400, &format!("GET error: {}", e)))
+    .map_err(|e| {
+        // something went very wrong. mark it with code 550 so that at the
+        // end of the future chain we can detect it and retry.
+        Response::error(550, &format!("GET error: {}", e))
+    })
     .and_then(|res| {
         // see if response is what we expected
         let is_json = res.headers().get("content-type").map(|h| h == "application/json").unwrap_or(false);
@@ -94,7 +107,6 @@ fn process2(ctx: Context, request: Request) -> impl Future<Item=String, Error=io
         };
         future::ok(Response::transform(body))
     })
-    //.map_err(|_: i32| io::Error::new(io::ErrorKind::Other, "oh no!"))
 }
 
 // over-engineered way to lowercase a string without allocating.
