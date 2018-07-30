@@ -58,6 +58,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     for sockaddr in config.server.listen.to_socket_addrs().unwrap() {
         println!("Listening on http://{:?}", sockaddr);
         let server = Server::try_bind(&sockaddr)?
+            .tcp_nodelay(true)
             .serve(webnis.clone())
             .map_err(|e| eprintln!("server error: {}", e));
         servers.push(server);
