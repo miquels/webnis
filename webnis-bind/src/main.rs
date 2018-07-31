@@ -18,7 +18,6 @@ extern crate tk_listen;
 
 mod cmd;
 mod config;
-mod codec;
 mod response;
 
 use std::fs;
@@ -28,13 +27,15 @@ use std::sync::{Arc,Mutex};
 use std::time::Duration;
 
 use futures::prelude::*;
+use futures::stream;
+use futures::sync::mpsc;
 use tokio_uds::UnixListener;
 use tokio_codec::Decoder;
 use tk_listen::ListenExt;
 use hyper::client::HttpConnector;
 use hyper_tls::HttpsConnector;
 
-use codec::LinesCodec;
+use tokio_codec::LinesCodec;
 
 #[derive(Clone)]
 //#[derive(Debug,Clone)]
@@ -88,15 +89,40 @@ fn main() {
     let server = listener.incoming()
         .map_err(|e| { eprintln!("accept error = {:?}", e); e })
         .sleep_on_error(Duration::from_millis(100))
-        //.map_err(|_| ())
         .map(move |socket| {
-            let (writer, reader) = LinesCodec::new(ctx.clone()).framed(socket).split();
-            let responses = reader.and_then(|(ctx, line)| cmd::process(ctx, line));
-            let session = writer.send_all(responses).map_err(|_| ()).map(|_| ());
-            session.map_err(|_| ())
+            let (writer, reader) = LinesCodec::new().framed(socket).split();
+
+            // produce a final "EOF" error on the stream when the client has gone away.
+            let final_eof = stream::once::<String, _>(Err(::std::io::Error::new(::std::io::ErrorKind::Other, "EOF")));
+            let reader = reader.chain(final_eof);
+
+            // We read the incoming stream continously, and forward it
+            // onto a channel. That way we can detect immediately if
+            // the client has gone away (EOF).
+            let (tx, rx) = mpsc::channel(0);
+            let fut = reader.then(move |res| {
+                if let Err(ref e) = res {
+                    println!("GOT ERR {}", e);
+                }
+                tx.clone().send(res)
+            })
+            .for_each(|_| Ok(())).map_err(|_| ());
+            tokio::spawn(fut);
+
+            // The reader side of the channel reads Result<Result<Item, Error>, ()>.
+            // Unwrap one level of Result.
+            let reader = rx.then(|x| {
+                match x {
+                    Ok(x) => x,
+                    Err(_) => unreachable!(),
+                }
+            });
+
+            let ctx = ctx.clone();
+            let responses = reader.and_then(move |line| cmd::process(ctx.clone(), line));
+            let session = writer.send_all(responses).map_err(|e| { println!("XXX writer error #2: {}", e); () } ).map(|_| ());
+            session
         })
-        // .listen(concurrency) from tk-listen is the same as this:
-        //.buffer_unordered(concurrency).for_each(|()| Ok(()));
         .listen(concurrency);
 
     tokio::run(server);
