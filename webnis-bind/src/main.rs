@@ -23,8 +23,9 @@ mod response;
 use std::fs;
 use std::io;
 use std::process::exit;
-use std::sync::{Arc,Mutex};
 use std::time::Duration;
+use std::sync::{Arc,Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::prelude::*;
 use futures::stream;
@@ -44,6 +45,8 @@ pub struct Context {
     config:      Arc<config::Config>,
     // a client that we can replace.
     client:     Arc<Mutex<Option<hyper::Client<HttpsConnector<HttpConnector>>>>>,
+    // has client gone away?
+    eof:        Arc<AtomicBool>,
 }
 
 fn main() {
@@ -74,6 +77,7 @@ fn main() {
     let ctx = Context{
         config: Arc::new(config),
 		client: Arc::new(Mutex::new(None)),
+        eof:    Arc::new(AtomicBool::new(false)),
     };
 
 	let listener = match UnixListener::bind(&listen) {
@@ -92,17 +96,24 @@ fn main() {
         .map(move |socket| {
             let (writer, reader) = LinesCodec::new().framed(socket).split();
 
-            // produce a final "EOF" error on the stream when the client has gone away.
-            let final_eof = stream::once::<String, _>(Err(::std::io::Error::new(::std::io::ErrorKind::Other, "EOF")));
-            let reader = reader.chain(final_eof);
+            let ctx = Context{
+                config:     ctx.config.clone(),
+                client:     ctx.client.clone(),
+                eof:        Arc::new(AtomicBool::new(false)),
+            };
 
-            // We read the incoming stream continously, and forward it
-            // onto a channel. That way we can detect immediately if
-            // the client has gone away (EOF).
+            // produce a final "EOF" error on the stream when the client has gone away.
+            let final_eof = stream::once::<String, _>(Err(io::Error::new(io::ErrorKind::Other, "EOF")));
+            let reader = reader.chain(final_eof);
+            let eof_clone = ctx.eof.clone();
+
+            // We read the incoming stream continously, and forward it onto a channel.
+            // That way we can detect immediately if the client has gone away (EOF).
             let (tx, rx) = mpsc::channel(0);
             let fut = reader.then(move |res| {
-                if let Err(ref e) = res {
-                    println!("GOT ERR {}", e);
+                if let Err(_) = res {
+                    debug!("reader saw error, setting EOF flag in Context");
+                    eof_clone.store(true, Ordering::SeqCst);
                 }
                 tx.clone().send(res)
             })
@@ -111,16 +122,12 @@ fn main() {
 
             // The reader side of the channel reads Result<Result<Item, Error>, ()>.
             // Unwrap one level of Result.
-            let reader = rx.then(|x| {
-                match x {
-                    Ok(x) => x,
-                    Err(_) => unreachable!(),
-                }
-            });
+            let reader = rx.then(|x| x.unwrap());
 
+            // process commands and write result.
             let ctx = ctx.clone();
             let responses = reader.and_then(move |line| cmd::process(ctx.clone(), line));
-            let session = writer.send_all(responses).map_err(|e| { println!("XXX writer error #2: {}", e); () } ).map(|_| ());
+            let session = writer.send_all(responses).map_err(|_| ()).map(|_| ());
             session
         })
         .listen(concurrency);

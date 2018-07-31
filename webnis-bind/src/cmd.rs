@@ -1,6 +1,7 @@
 
 use std::io;
 use std::time::{Instant,Duration};
+use std::sync::atomic::Ordering;
 
 use url::Url;
 use hyper;
@@ -124,7 +125,7 @@ fn get_with_retries(ctx: &Context, uri: hyper::Uri, n_retries: u32) -> Box<Futur
         let body = match res {
             Ok(body) => body,
             Err(e) => {
-                if e.starts_with("550 ") && n_retries < 8 {
+                if e.starts_with("550 ") && !ctx_clone.eof.load(Ordering::SeqCst) && n_retries < 8 {
                     debug!("scheduling retry {} because of {}", n_retries + 1, e);
 					// invalidate current hyper::Client.
                     {
