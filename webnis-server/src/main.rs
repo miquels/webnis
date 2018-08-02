@@ -1,6 +1,7 @@
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate serde_json;
 #[macro_use] extern crate log;
+#[macro_use] extern crate clap;
 extern crate serde;
 extern crate hyper;
 extern crate env_logger;
@@ -33,9 +34,15 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     env_logger::init();
 
-    let config = config::read("webnis-server.toml")?;
+    let matches = clap_app!(webnis_server =>
+        (version: "0.1")
+        (@arg CFG: -c --config +takes_value "configuration file (/etc/webnis-server.toml)")
+    ).get_matches();
+    let cfg = matches.value_of("CFG").unwrap_or("/etc/webnis-server.toml");
+
+    let config = config::read(cfg)?;
     if config.domain.len() == 0 {
-        eprintln!("{}: no domains defined in config", PROGNAME);
+        eprintln!("{}: no domains defined in {}", PROGNAME, cfg);
         exit(1);
     }
 
