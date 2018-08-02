@@ -53,6 +53,8 @@ pub struct Context {
     http_client:    Arc<Mutex<HttpClient>>,
     // has client gone away?
     eof:            Arc<AtomicBool>,
+    // priviliged?
+    privileged:     bool,
 }
 
 const PROGNAME : &'static str = "webnis-bind";
@@ -87,8 +89,10 @@ fn main() {
         config:         Arc::new(config),
 		http_client:    Arc::new(Mutex::new(HttpClient{ client: None, seqno: seqno })),
         eof:            Arc::new(AtomicBool::new(false)),
+        privileged:     false,
     };
 
+    // Get a UNIX stream listener.
 	let listener = match UnixListener::bind(&listen) {
         Ok(m) => Ok(m),
         Err(ref e) if e.kind() == io::ErrorKind::AddrInUse => {
@@ -109,13 +113,21 @@ fn main() {
         .map_err(|e| { eprintln!("{}: accept error = {:?}", PROGNAME, e); e })
         .sleep_on_error(Duration::from_millis(100))
         .map(move |socket| {
-            let (writer, reader) = LinesCodec::new().framed(socket).split();
 
+            // set up context for this session.
+            let privileged = match socket.peer_cred() {
+                Ok(creds) => creds.uid == 0 || creds.gid == 0,
+                Err(_) => false,
+            };
             let ctx = Context{
                 config:         ctx.config.clone(),
                 http_client:    ctx.http_client.clone(),
                 eof:            Arc::new(AtomicBool::new(false)),
+                privileged:     privileged,
             };
+
+            // set up codec for reader and writer.
+            let (writer, reader) = LinesCodec::new().framed(socket).split();
 
             // produce a final "EOF" error on the stream when the client has gone away.
             let final_eof = stream::once::<String, _>(Err(io::Error::new(io::ErrorKind::Other, "EOF")));
