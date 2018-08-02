@@ -9,6 +9,7 @@ extern crate toml;
 extern crate futures;
 extern crate gdbm;
 extern crate http;
+extern crate libc;
 extern crate routematcher;
 
 mod config;
@@ -45,6 +46,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
         eprintln!("{}: no domains defined in {}", PROGNAME, cfg);
         exit(1);
     }
+
+    // arbitrary limit, really.
+    raise_rlimit_nofile(64000);
 
     // build the routes we're going to serve.
     let builder = Builder::new();
@@ -276,5 +280,35 @@ impl Webnis {
 
         http_error(StatusCode::INTERNAL_SERVER_ERROR, "Unsupported database format")
     }
+}
+
+fn raise_rlimit_nofile(want_lim: libc::rlim_t) {
+    // get current rlimit.
+    let mut rlim = libc::rlimit{ rlim_cur: 0, rlim_max: 0 };
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim as *mut libc::rlimit) } != 0 {
+        return;
+    }
+
+    // might be enough already.
+    if rlim.rlim_cur >= want_lim {
+        return;
+    }
+
+    // if the current soft limit is smaller than the current hard limit,
+    // first try raising the soft limit as far as we can or need.
+    if rlim.rlim_cur < rlim.rlim_max {
+        let lim = std::cmp::min(want_lim, rlim.rlim_max);
+        let new_rlim = libc::rlimit{ rlim_cur: lim, rlim_max: rlim.rlim_max };
+        if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &new_rlim as *const libc::rlimit) } != 0 {
+                return
+        }
+        if lim >= want_lim {
+            return;
+        }
+    }
+
+    // still not enough? try upping the hard limit.
+    let new_rlim = libc::rlimit{ rlim_cur: want_lim, rlim_max: want_lim };
+    unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &new_rlim as *const libc::rlimit) };
 }
 

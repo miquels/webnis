@@ -17,5 +17,5 @@ hyper-tls = "0.3"
 toml = "0.4.6"
 http = "0.1.8"
 routematcher = { path = "routematcher" }
-#gdbm = { git = "https://github.com/miquels/gdbm", branch = "datum-dsize-fix" }
 gdbm = "0.1.1"
+libc = "0.2.42"
