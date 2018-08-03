@@ -4,7 +4,10 @@ version = "0.1.0"
 authors = ["mikevs <mikevs@xs4all.net>"]
 
 [dependencies]
-libc = "0.2"
+pamsm = "0.1.0"
+lazy_static = "1.0.2"
+log = "0.4.3"
+env_logger = "0.5.11"
 
 [lib]
 name = "pam_webnis"

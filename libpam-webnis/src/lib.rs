@@ -1,7 +1,8 @@
+#[macro_use] extern crate log;
+#[macro_use] extern crate lazy_static;
+extern crate env_logger;
+extern crate pamsm;
 
-extern crate libc;
+mod webnis;
 
-//mod webnis;
-//mod errors;
-//pub mod nss;
-
+pub use webnis::get_pam_sm;
