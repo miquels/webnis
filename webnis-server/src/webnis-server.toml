@@ -6,11 +6,20 @@
   db_dir = "/var/yp/xs4all.nl"
   maps = [ "passwd", "group", "gidlist" ]
   default = true
+  auth = "adjunct"
 
 [[domain]]
   name = "shell.xs4all.nl"
   db_dir = "/var/yp/shell.xs4all.nl"
   maps = [ "passwd", "group" ]
+
+[auth.adjunct]
+  map = "adjunct"
+  key = "name"
+  shells = "normal"
+
+[shells.normal]
+  allow = [ "bash", "csh", "ksh", "sh", "tcsh", "zsh" ]
 
 [map.passwd.byname]
   key = "name"
@@ -24,6 +33,12 @@
   map_format = "passwd"
   map_type   = "gdbm"
   map_file = "passwd.byuid"
+
+[map.adjunct]
+  key = "name"
+  map_format = "adjunct"
+  map_type   = "gdbm"
+  map_file = "passwd.adjunct.byname"
 
 [map.group]
   keys = [ "name", "gid" ]

@@ -13,9 +13,14 @@ use toml;
 pub struct Config {
     pub server:     Server,
     pub domain:     Vec<Domain>,
+    #[serde(default)]
     pub map:        HashMap<String, MapOrMaps>,
     #[serde(skip)]
     pub map_:       HashMap<String, Vec<Map>>,
+    #[serde(default)]
+    pub auth:       HashMap<String, Auth>,
+    #[serde(default)]
+    pub shells:     HashMap<String, Shells>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -28,8 +33,23 @@ pub struct Domain {
     pub name:       String,
     pub db_dir:     String,
     pub maps:       Vec<String>,
-    #[serde(default,rename = "default")]
-    pub is_default: bool,
+    pub auth:       Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Auth {
+    pub map:            String,
+    pub key:            String,
+    #[serde(default)]
+    pub shells:         String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Shells {
+    #[serde(default)]
+    pub allow:          Vec<String>,
+    #[serde(default)]
+    pub deny:           Vec<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

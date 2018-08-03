@@ -14,14 +14,6 @@ pub struct Passwd<'a> {
     pub shell:      &'a str,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Group<'a> {
-    pub name:       &'a str,
-    pub passwd:     &'a str,
-    pub gid:        u32,
-    pub mem:        Vec<&'a str>,
-}
-
 impl<'a> Passwd<'a> {
     pub fn from_line(line: &'a str) -> Result<Passwd<'a>, FormatError> {
         let fields = line.split(':').collect::<Vec<_>>();
@@ -39,6 +31,34 @@ impl<'a> Passwd<'a> {
         };
         Ok(p)
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Adjunct<'a> {
+    pub name:       &'a str,
+    pub passwd:     &'a str,
+}
+
+impl<'a> Adjunct<'a> {
+    pub fn from_line(line: &'a str) -> Result<Adjunct<'a>, FormatError> {
+        let fields = line.split(':').collect::<Vec<_>>();
+        if fields.len() < 2 {
+            return Err(FormatError);
+        }
+        let p = Adjunct{
+            name:   fields[0],
+            passwd: fields[1],
+        };
+        Ok(p)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Group<'a> {
+    pub name:       &'a str,
+    pub passwd:     &'a str,
+    pub gid:        u32,
+    pub mem:        Vec<&'a str>,
 }
 
 impl<'a> Group<'a> {
@@ -61,6 +81,7 @@ pub fn line_to_json(line: &str, format: &str) -> Result<serde_json::Value, Forma
     match format {
         "passwd" => serde_json::to_value(&Passwd::from_line(line)?).map_err(|_| FormatError),
         "group"  => serde_json::to_value(&Group::from_line(line)?).map_err(|_| FormatError),
+        "adjunct"  => serde_json::to_value(&Adjunct::from_line(line)?).map_err(|_| FormatError),
         _ => Err(FormatError),
     }
 }

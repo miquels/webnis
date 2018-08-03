@@ -10,6 +10,7 @@ extern crate futures;
 extern crate gdbm;
 extern crate http;
 extern crate libc;
+extern crate pwhash;
 extern crate routematcher;
 
 mod config;
@@ -52,15 +53,24 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     // build the routes we're going to serve.
     let builder = Builder::new();
-    if let Some(def_domain) = config.domain.iter().find(|d| d.is_default) {
-        builder
-            .add("/webnis/:map")
-            .method(&Method::GET)
-            .label(&def_domain.name);
-    }
     builder
-        .add("/webnis/:domain/:map")
-        .method(&Method::GET);
+        .add("/webnis/:domain/map/:map")
+        .method(&Method::GET)
+        .label("map");
+    builder
+        .add("/.well-known/webnis/:domain/map/:map")
+        .method(&Method::GET)
+        .label("map");
+    builder
+        .add("/webnis/:domain/auth")
+        .method(&Method::GET)
+        .method(&Method::POST)
+        .label("auth");
+    builder
+        .add("/.well-known/webnis/:domain/auth")
+        .method(&Method::GET)
+        .method(&Method::POST)
+        .label("auth");
     let matcher = builder.compile();
     let webnis = Webnis::new(matcher, config.clone());
 
@@ -82,11 +92,15 @@ fn main() -> Result<(), Box<std::error::Error>> {
     Ok(())
 }
 
-// helper.
+// helpers.
 fn http_error(code: StatusCode, msg: &str) -> BoxedFuture {
+    http_error2(code, code, msg)
+}
+
+fn http_error2(outer_code: StatusCode, inner_code: StatusCode, msg: &str) -> BoxedFuture {
     let body = json!({
         "error": {
-            "code":     code.as_u16(),
+            "code":     inner_code.as_u16(),
             "message":  msg,
         }
     });
@@ -94,7 +108,7 @@ fn http_error(code: StatusCode, msg: &str) -> BoxedFuture {
 
     let r = Response::builder()
         .header(header::CONTENT_TYPE, "application/json")
-        .status(code)
+        .status(outer_code)
         .body(body.into()).unwrap();
     Box::new(future::ok(r))
 }
@@ -111,7 +125,6 @@ fn http_result(code: StatusCode, msg: &serde_json::Value) -> BoxedFuture {
         .body(body.into()).unwrap();
     Box::new(future::ok(r))
 }
-
 
 #[derive(Clone,Debug)]
 struct Webnis {
@@ -175,7 +188,7 @@ impl Service for Webnis {
             None => return http_error(StatusCode::NOT_FOUND, "Not Found"),
             Some(m) => m,
         };
-        let domain = match mat.route_param("domain").or(mat.label()) {
+        let domain = match mat.route_param("domain") {
             None => return http_error(StatusCode::NOT_FOUND, "Not Found"),
             Some(d) => d,
         };
@@ -186,18 +199,67 @@ impl Service for Webnis {
             Some(d) => d,
         };
 
-        // find the map definition and the key.
-        let (map, key, val) = match self.find_map(domdef, &mat) {
-            Err(e) => return e,
-            Ok(v) => v,
-        };
+        // auth or map lookup ?
+        match mat.label() {
+            Some("auth") => {
+                // authenticate.
+                self.auth(domdef, &mat)
+            },
+            Some("map") => {
+                // find the map definition and the key.
+                let (map, key, val) = match self.find_map(domdef, &mat) {
+                    Err(e) => return e,
+                    Ok(v) => v,
+                };
 
-        // query the database.
-        self.serve_map(domdef, map, key, val)
+                // query the database.
+                self.serve_map(domdef, map, key, val)
+            },
+            _ => {
+                // never happens
+                http_error(StatusCode::INTERNAL_SERVER_ERROR, "wut?")
+            },
+        }
     }
 }
 
 impl Webnis {
+
+    // authenticate.
+    fn auth<'a, 'b>(&'a self, domain: &config::Domain, mat: &'b Match) -> BoxedFuture {
+
+        // Get query parameters.
+        let (login, password) = match (mat.query_param("login"), mat.query_param("password")) {
+            (Some(l), Some(p)) => (l, p),
+            _ => return http_error(StatusCode::BAD_REQUEST, "Query parameters missing"),
+        };
+
+        // Domain has "auth=x", now find auth "x" in the main config.
+        let auth = match domain.auth.as_ref().and_then(|a| self.inner.config.auth.get(a)) {
+            None => return http_error(StatusCode::NOT_FOUND, "Authentication not enabled"),
+            Some(a) => a,
+        };
+
+        // Now auth says "map=y" and "key=z" which means we have to find the
+        // map named "y" that supports lookup key "z".
+        let mut map : Option<&config::Map> = None;
+        let maps = self.inner.config.map_.get(&auth.map);
+        if let Some(maps) = maps {
+            for m in maps.iter() {
+                if m.key.iter().chain(m.keys.iter()).find(|ref k| **k == &auth.key).is_some() {
+                    map = Some(m);
+                    break;
+                }
+            }
+        }
+        let map = match map {
+            None => return http_error(StatusCode::NOT_FOUND, "Associated auth map not found"),
+            Some(m) => m,
+        };
+
+        // And auth on this map.
+        self.auth_map(domain, map, &auth.key, login, password)
+    }
 
     // find the map we want to serve.
     fn find_map<'a, 'b>(&'a self, domain: &config::Domain, mat: &'b Match) -> Result<(&'a config::Map, &'a str, &'b str), BoxedFuture> {
@@ -240,33 +302,44 @@ impl Webnis {
         Err(http_error(StatusCode::BAD_REQUEST, "No valid key parameter found"))
     }
 
-    fn serve_gdbm_map(&self, dom: &config::Domain, map: &config::Map, keyval: &str) -> BoxedFuture {
+    fn lookup_gdbm_map(&self, dom: &config::Domain, map: &config::Map, keyval: &str) -> Result<serde_json::Value, BoxedFuture> {
         let format = match map.map_format {
-            None => return http_error(StatusCode::INTERNAL_SERVER_ERROR, "Map format not set"),
+            None => return Err(http_error(StatusCode::INTERNAL_SERVER_ERROR, "Map format not set")),
             Some(ref s) => s,
         };
         let path = format!("{}/{}", dom.db_dir, map.map_file);
         let line = match db::gdbm_lookup(&path, keyval) {
-            Err(DbError::NotFound) => return http_error(StatusCode::NOT_FOUND, "No such key in map"),
-            Err(DbError::MapNotFound) => return http_error(StatusCode::NOT_FOUND, "No such map"),
-            Err(DbError::Other) => return http_error(StatusCode::INTERNAL_SERVER_ERROR, "Error reading database"),
+            Err(DbError::NotFound) => return Err(http_error(StatusCode::NOT_FOUND, "No such key in map")),
+            Err(DbError::MapNotFound) => return Err(http_error(StatusCode::NOT_FOUND, "No such map")),
+            Err(DbError::Other) => return Err(http_error(StatusCode::INTERNAL_SERVER_ERROR, "Error reading database")),
             Ok(r) => r,
         };
 
-        let jv = match format::line_to_json(&line, &format) {
-            Err(_) => return http_error(StatusCode::INTERNAL_SERVER_ERROR, "Error formatting reply"),
-            Ok(j) => j,
+        format::line_to_json(&line, &format).map_err(|_| http_error(StatusCode::INTERNAL_SERVER_ERROR, "Error in json serialization"))
+    }
+
+    fn serve_gdbm_map(&self, dom: &config::Domain, map: &config::Map, keyval: &str) -> BoxedFuture {
+        let jv = match self.lookup_gdbm_map(dom, map, keyval) {
+            Ok(jv) => jv,
+            Err(e) => return e,
         };
         http_result(StatusCode::OK, &jv)
     }
 
-    fn serve_json_map(&self, dom: &config::Domain, map: &config::Map, keyname:&str, keyval: &str) -> BoxedFuture {
+    fn lookup_json_map(&self, dom: &config::Domain, map: &config::Map, keyname:&str, keyval: &str) -> Result<serde_json::Value, BoxedFuture> {
         let path = format!("{}/{}", dom.db_dir, map.map_file);
-        let jv = match db::json_lookup(path, keyname, keyval) {
-            Err(DbError::NotFound) => return http_error(StatusCode::NOT_FOUND, "No such key in map"),
-            Err(DbError::MapNotFound) => return http_error(StatusCode::NOT_FOUND, "No such map"),
-            Err(DbError::Other) => return http_error(StatusCode::INTERNAL_SERVER_ERROR, "Error reading database"),
-            Ok(r) => r,
+        match db::json_lookup(path, keyname, keyval) {
+            Err(DbError::NotFound) => return Err(http_error(StatusCode::NOT_FOUND, "No such key in map")),
+            Err(DbError::MapNotFound) => return Err(http_error(StatusCode::NOT_FOUND, "No such map")),
+            Err(DbError::Other) => return Err(http_error(StatusCode::INTERNAL_SERVER_ERROR, "Error reading database")),
+            Ok(r) => Ok(r),
+        }
+    }
+
+    fn serve_json_map(&self, dom: &config::Domain, map: &config::Map, keyname:&str, keyval: &str) -> BoxedFuture {
+        let jv = match self.lookup_json_map(dom, map, keyname, keyval) {
+            Ok(jv) => jv,
+            Err(e) => return e,
         };
         http_result(StatusCode::OK, &jv)
     }
@@ -277,8 +350,32 @@ impl Webnis {
             "json" => return self.serve_json_map(dom, map, keyname, keyval),
             _ => {},
         }
-
         http_error(StatusCode::INTERNAL_SERVER_ERROR, "Unsupported database format")
+    }
+
+    fn auth_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str, passwd: &str) -> BoxedFuture {
+        // do map lookup.
+        let res = match map.map_type.as_str() {
+            "gdbm" => self.lookup_gdbm_map(dom, map, keyval),
+            "json" => self.lookup_json_map(dom, map, keyname, keyval),
+            _ => return http_error(StatusCode::INTERNAL_SERVER_ERROR, "Unsupported database format"),
+        };
+        // find the returned JSON
+        let json = match res {
+            Ok(jv) => jv,
+            Err(e) => return e,
+        };
+
+        // extract password and auth.
+        let ok = match json.get("passwd").map(|p| p.as_str()).unwrap_or(None) {
+            None => false,
+            Some(p) => pwhash::unix::verify(passwd, p),
+        };
+        if ok {
+            http_result(StatusCode::OK, &json!({}))
+        } else {
+            http_error2(StatusCode::FORBIDDEN, StatusCode::UNAUTHORIZED, "Password incorrect")
+        }
     }
 }
 
