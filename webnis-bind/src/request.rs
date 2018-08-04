@@ -18,6 +18,10 @@ use futures::future;
 use super::Context;
 use super::response::Response;
 
+const RETRY_MAX: u32 = 8;
+const RETRY_DELAY_MS: u64 = 250;
+const REQUEST_TIMEOUT_MS: u64 = 1000;
+
 /// Possible requests our clients can send us
 pub(crate) struct Request<'a> {
     cmd:    Cmd,
@@ -63,16 +67,12 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
 // the host is localhost, https otherwise.
 fn build_uri(host: &str, path: &str) -> hyper::Uri {
     let url = if host.starts_with("http://") || host.starts_with("https://") {
-        let host = if host.ends_with("/") {
-            &host[0..host.len() - 1]
-        } else {
-            host
-        };
+        let host = host.trim_right_matches("/");
         format!("{}{}", host, path)
     } else if host == "localhost" || host.starts_with("localhost:") {
-        format!("http://{}/webnis{}", host, path)
+        format!("http://{}/.well-known/webnis{}", host, path)
     } else {
-        format!("https://{}/webnis{}", host, path)
+        format!("https://{}/.well-known/webnis{}", host, path)
     };
     url.parse::<hyper::Uri>().unwrap()
 }
@@ -154,7 +154,7 @@ fn get_with_retries(ctx: &Context, path: String, n_retries: u32) -> Box<Future<I
     });
 
     // add a timeout. need to have an answer in 1 second.
-    let timeout = Instant::now() + Duration::from_millis(1000);
+    let timeout = Instant::now() + Duration::from_millis(REQUEST_TIMEOUT_MS);
     let body_tmout_wrapper = body.deadline(timeout).map_err(|e| {
         debug!("timeout wrapper: error on {}", e);
         match e.into_inner() {
@@ -168,7 +168,7 @@ fn get_with_retries(ctx: &Context, path: String, n_retries: u32) -> Box<Future<I
         let body = match res {
             Ok(body) => body,
             Err(e) => {
-                if !e.starts_with("404 ") && !ctx_clone.eof.load(Ordering::SeqCst) && n_retries < 8 {
+                if !e.starts_with("404 ") && !ctx_clone.eof.load(Ordering::SeqCst) && n_retries < RETRY_MAX {
                     {
     				    let mut guard = ctx_clone.http_client.lock().unwrap();
                         if (*guard).seqno == seqno {
@@ -197,7 +197,7 @@ fn get_with_retries(ctx: &Context, path: String, n_retries: u32) -> Box<Future<I
     });
 
     if n_retries > 0 {
-        let when = Instant::now() + Duration::from_millis(250);
+        let when = Instant::now() + Duration::from_millis(RETRY_DELAY_MS);
         Box::new(Delay::new(when).then(move |_| resp))
     } else {
         Box::new(resp)
