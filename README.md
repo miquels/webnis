@@ -13,19 +13,25 @@ Webnis contains:
 ## webnis-server
 
 A simple HTTPS server that serves gdbm / json maps indexed by a key.
-It can in fact serve existing NIS maps from /var/yp/<domain>.
+It can in fact serve existing NIS maps from /var/yp/<domain>. It can
+also do authentication by looking up username/password in one of those
+maps and verifying the password using pwhash::unix::verify().
 
-## libnss-webnis
+## webnis-nss
 
-A NSS module that does passwd/group lookups via webnis (using webnis-bind).
+A NSS module (libnss_webnis.so.2) that does passwd/group lookups via webnis (using webnis-bind).
 
-## libpam-webnis
+## webnis-pam
 
-A PAM module that authenticates via webnis (using webnis-bind).
+A PAM module (pam_webnis.so) that authenticates via webnis (using webnis-bind).
 
 ## webnis-bind
 
-A daemon that sits between the webnis-server and libpam-webnis/libnss-webnis.
+A daemon that sits between the webnis-server and webnis-pam/webnis-nss.
 It checks which servers are alive, does reconnects, keeps a connection
 pool open, etc. Clients talk to the daemon over a Unix socket.
+
+## webnis-utils
+
+Soon! This will contain wncat, wnmatch, wnwhich.
 

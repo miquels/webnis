@@ -1,5 +1,5 @@
 [package]
-name = "libnss-webnis"
+name = "webnis-nss"
 version = "0.1.0"
 authors = ["mikevs <mikevs@xs4all.net>"]
 
@@ -10,5 +10,5 @@ env_logger = "0.5.11"
 
 [lib]
 name = "nss_webnis"
-crate-type = [ "cdylib", "rlib" ]
+crate-type = [ "cdylib" ]
 

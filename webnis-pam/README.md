@@ -1,15 +1,15 @@
 
-# libpam-webnis
+# webnis-pam
 
 PAM module for Linux that authenticates against a HTTP server.
 
 The PAM module itself does not actually speak HTTP. It connects over
-a local UNIX socket to the webnisd daemon, and it talks a
-simple line-based protocol on that socket. The webnisd daemon
-is responsible for connecting to the HTTP backend server,
+a local UNIX socket to the webnis-bind daemon, and it talks a
+simple line-based protocol on that socket. The webnis-bind daemon
+is responsible for connecting to the HTTPS backend server,
 sending the request , and receiving/decoding the JSON response.
 
-The line based protocol between the module and webnisd is like:
+The line based protocol between the module and webnis-bind is like:
 
 ```
 >> PAM 1.0

@@ -51,7 +51,7 @@ pub extern "C" fn _nss_webnis_initgroups_dyn(name: *const c_char,
         Ok(s) => s,
         Err(_) => return nss_error(NssError::Unavailable, errnop),
     };
-    debug!("libnss-http initgroups_dyn called for {}", name);
+    debug!("libnss-webnis initgroups_dyn called for {}", name);
 
     let user_gids = match NSS.with(|nss| nss.getgidlist(name)) {
         Ok(gids) => gids,
@@ -61,14 +61,14 @@ pub extern "C" fn _nss_webnis_initgroups_dyn(name: *const c_char,
 
     // If we get no gids, then we have nothing to do.
     if user_gids.is_empty() {
-        debug!("libnss-http: _initgroups_dyn: no user groups for {}", name);
+        debug!("libnss-webnis: _initgroups_dyn: no user groups for {}", name);
         return NssStatus::Success as i32;
     }
 
     // How big is the array we were passed, and how deep into it are we?
     let mut idx = unsafe { *start };
     let mut gid_arraysz = unsafe { *size };
-    debug!("libnss-http gids array size={}@idx {}, adding {}",
+    debug!("libnss-webnis gids array size={}@idx {}, adding {}",
              gid_arraysz,
              idx,
              user_gids.len());
@@ -122,7 +122,7 @@ pub extern "C" fn _nss_webnis_getgrnam_r(name: *const c_char,
         Ok(s) => s,
         Err(_) => return nss_error(NssError::Unavailable, errnop),
     };
-    debug!("libnss-http getgrnam_r called for {}", name);
+    debug!("libnss-webnis getgrnam_r called for {}", name);
 
     let group = match Group::new(result, buffer, buflen) {
         Ok(g) => g,
@@ -143,7 +143,7 @@ pub extern "C" fn _nss_webnis_getgrgid_r(gid: gid_t,
                                       -> i32 {
 
     assert!(!result.is_null() && !buffer.is_null() && !errnop.is_null());
-    debug!("libnss-http getgrgid_r called for {}", gid);
+    debug!("libnss-webnis getgrgid_r called for {}", gid);
 
     let group = match Group::new(result, buffer, buflen) {
         Ok(g) => g,
@@ -169,7 +169,7 @@ pub extern "C" fn _nss_webnis_getpwnam_r(name: *const c_char,
         Ok(s) => s,
         Err(_) => return nss_error(NssError::Unavailable, errnop),
     };
-    debug!("libnss-http getpwnam_r called for {}", name);
+    debug!("libnss-webnis getpwnam_r called for {}", name);
 
     let passwd = match Passwd::new(result, buffer, buflen) {
         Ok(g) => g,
@@ -190,7 +190,7 @@ pub extern "C" fn _nss_webnis_getpwuid_r(uid: uid_t,
                                       -> i32 {
 
     assert!(!result.is_null() && !buffer.is_null() && !errnop.is_null());
-    debug!("libnss-http getpwuid_r called for {}", uid);
+    debug!("libnss-webnis getpwuid_r called for {}", uid);
 
     let passwd = match Passwd::new(result, buffer, buflen) {
         Ok(p) => p,

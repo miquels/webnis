@@ -1,5 +1,5 @@
 
-# libnss-webnis
+# webnis-nss
 
 NSS module for Linux that gets user/group info from an HTTP server.
 

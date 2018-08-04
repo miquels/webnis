@@ -9,13 +9,6 @@ use pamsm::{self,PamServiceModule,PamError};
 
 static SOCKADDR: &'static str = "/var/run/webnis-bind.sock";
 
-// doc sources used:
-// https://github.com/vyos/libpam-radius-auth/blob/current/src/pam_radius_auth.h
-// https://github.com/vyos/libpam-radius-auth/blob/current/src/pam_radius_auth.c
-// https://github.com/rcatolino/pam_sm_rust/blob/master/src/pam_raw.rs
-// https://linux.die.net/man/3/pam_authenticate
-// https://linux.die.net/man/3/pam_get_item
-
 // lazy static so that a first call of DEBUG() initialises the debug logger.
 lazy_static! {
     static ref DEBUG: fn() -> () = {

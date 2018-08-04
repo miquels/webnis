@@ -1,5 +1,5 @@
 [package]
-name = "libpam-webnis"
+name = "webnis-pam"
 version = "0.1.0"
 authors = ["mikevs <mikevs@xs4all.net>"]
 
