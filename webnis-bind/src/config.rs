@@ -7,7 +7,8 @@ use toml;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
-    pub domain:         Option<String>,
+    #[serde(default)]
+    pub domain:         String,
     pub password:       String,
     pub server:         Option<String>,
     #[serde(default)]
@@ -32,5 +33,9 @@ pub fn read(name: &str) -> io::Result<Config> {
     if config.servers.len() == 0 {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "no servers defined"));
     }
+    if config.domain.as_str() == "" {
+        config.domain = "default".to_string();
+    }
+
     Ok(config)
 }

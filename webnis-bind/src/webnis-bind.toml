@@ -1,11 +1,14 @@
 # The domain to use. If not set, uses the default domain
 #domain     = "webnis"
+domain     = "xs4all.nl"
 
 # Password for this domain.
 password   = "webnis"
 
 # Server to use. Users servers = [ ... ] for multiple servers.
-server     = "localhost:3333"
+#server     = "localhost:3333"
+servers     = [ "localhost:3333", "localhost:8245" ]
+#servers     = [ "www.xs4all.nl:3333", "smtp.xs4all.nl:8245" ]
 #servers    = [ "auth1.xs4all.nl", "auth2.xs4all.nl" ]
 
 # Max outstanding HTTP requests to the  server. 32 is the default.

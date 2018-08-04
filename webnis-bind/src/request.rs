@@ -30,32 +30,30 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
         Err(e) => return Box::new(future::ok(Response::error(400, &e))),
     };
 
+    if request.cmd == Cmd::Auth {
+        // authentication
+        let path = format!("/{}/auth?login={}&password={}",
+                        utf8_percent_encode(&ctx.config.domain, DEFAULT_ENCODE_SET),
+                        utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET),
+                        utf8_percent_encode(&request.args[1], QUERY_ENCODE_SET));
+        return get_with_retries(&ctx, path, 0)
+    }
+
+    // map lookup
     let (map, param) = match request.cmd {
         Cmd::GetPwNam => ("passwd", "name"),
         Cmd::GetPwUid => ("passwd", "uid"),
         Cmd::GetGrNam => ("group", "name"),
         Cmd::GetGrGid => ("group", "gid"),
         Cmd::GetGidList => ("gidlist", "name"),
+        _ => unreachable!(),
     };
-    let path = build_path(&ctx.config, map, param, &request.args[0]);
-
+    let path = format!("/{}/map/{}?{}={}",
+                utf8_percent_encode(&ctx.config.domain, DEFAULT_ENCODE_SET),
+                utf8_percent_encode(map, DEFAULT_ENCODE_SET),
+                utf8_percent_encode(param, QUERY_ENCODE_SET),
+                utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET));
     get_with_retries(&ctx, path, 0)
-}
-
-// build a path from a domain, map, key, value.
-fn build_path(cfg: &super::config::Config, map: &str, key: &str, val: &str) -> String {
-    if let Some(ref dom) = cfg.domain {
-        format!("/{}/{}?{}={}",
-                utf8_percent_encode(dom, DEFAULT_ENCODE_SET),
-                utf8_percent_encode(map, DEFAULT_ENCODE_SET),
-                utf8_percent_encode(key, QUERY_ENCODE_SET),
-                utf8_percent_encode(val, QUERY_ENCODE_SET))
-    } else {
-        format!("/{}?{}={}",
-                utf8_percent_encode(map, DEFAULT_ENCODE_SET),
-                utf8_percent_encode(key, QUERY_ENCODE_SET),
-                utf8_percent_encode(val, QUERY_ENCODE_SET))
-    }
 }
 
 // build a hyper::Uri from a host and a path.
@@ -206,7 +204,9 @@ fn get_with_retries(ctx: &Context, path: String, n_retries: u32) -> Box<Future<I
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum Cmd {
+    Auth,
     GetPwNam,
     GetPwUid,
     GetGrNam,
@@ -240,7 +240,7 @@ impl<'a> Request<'a> {
         };
         let args = parts.collect::<Vec<_>>();
         let (cmd, nargs) = match c {
-            //"auth" => (Cmd::Auth, 3),
+            "auth" => (Cmd::Auth, 2),
             "getpwnam" => (Cmd::GetPwNam, 1),
             "getpwuid" => (Cmd::GetPwUid, 1),
             "getgrnam" => (Cmd::GetGrNam, 1),

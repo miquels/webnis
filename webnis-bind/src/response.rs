@@ -25,6 +25,7 @@ pub enum ResponseVariants<'a> {
 	Passwd(#[serde(borrow)] Passwd<'a>),
 	Group(#[serde(borrow)] Group<'a>),
 	Gidlist(#[serde(borrow)] Gidlist<'a>),
+	Auth(Auth),
 }
 
 #[derive(Serialize,Deserialize)]
@@ -52,6 +53,9 @@ pub struct Gidlist<'a> {
     gidlist:    Vec<gid_t>,
 }
 
+#[derive(Serialize,Deserialize)]
+pub struct Auth {}
+
 impl<'a> Response<'a> {
 
     pub fn transform(s: hyper::Chunk) -> String {
@@ -67,6 +71,7 @@ impl<'a> Response<'a> {
             ResponseVariants::Passwd(p) => p.to_line(),
             ResponseVariants::Group(p) => p.to_line(),
             ResponseVariants::Gidlist(p) => p.to_line(),
+            ResponseVariants::Auth(p) => p.to_line(),
         };
         line
     }
@@ -115,6 +120,12 @@ impl<'a> Gidlist<'a> {
         let gid_array = self.gidlist.iter().map(|m| m.to_string()).collect::<Vec<String>>();
         let gids = gid_array.iter().map(|s| s.as_str()).collect::<Vec<&str>>().join(",");
         format!("200 {}:{}", self.name, gids)
+    }
+}
+
+impl Auth {
+    pub fn to_line(&self) -> String {
+        "200 OK".to_string()
     }
 }
 
