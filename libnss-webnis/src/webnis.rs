@@ -74,8 +74,8 @@ fn wnbind_try(cmd: &str, arg: &str) -> NssResult<String> {
         return Err(e)?;
     }
 
-    // Now decode the line.
-    let mut s = line.splitn(2, ' ');
+    // split into reply-code and message-text
+    let mut s = line.trim_right().splitn(2, ' ');
     let num = s.next().unwrap();
     let val = s.next().unwrap_or("");
 
