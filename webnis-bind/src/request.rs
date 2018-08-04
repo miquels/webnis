@@ -18,7 +18,7 @@ use futures::future;
 use super::Context;
 use super::response::Response;
 
-const RETRY_MAX: u32 = 8;
+const MAX_TRIES: u32 = 8;
 const RETRY_DELAY_MS: u64 = 250;
 const REQUEST_TIMEOUT_MS: u64 = 1000;
 
@@ -40,7 +40,7 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
                         utf8_percent_encode(&ctx.config.domain, DEFAULT_ENCODE_SET),
                         utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET),
                         utf8_percent_encode(&request.args[1], QUERY_ENCODE_SET));
-        return get_with_retries(&ctx, path, 0)
+        return get_with_retries(&ctx, path, 1)
     }
 
     // map lookup
@@ -102,7 +102,7 @@ fn new_client(config: &super::config::Config) -> hyper::Client<HttpsConnector<Ht
 // https://github.com/hyperium/hyper/issues/1422
 // https://github.com/rust-lang/rust/issues/47955
 //
-fn get_with_retries(ctx: &Context, path: String, n_retries: u32) -> Box<Future<Item=String, Error=io::Error> + Send> {
+fn get_with_retries(ctx: &Context, path: String, try_no: u32) -> Box<Future<Item=String, Error=io::Error> + Send> {
 
     let ctx_clone = ctx.clone();
 
@@ -168,13 +168,13 @@ fn get_with_retries(ctx: &Context, path: String, n_retries: u32) -> Box<Future<I
         let body = match res {
             Ok(body) => body,
             Err(e) => {
-                if !e.starts_with("404 ") && !ctx_clone.eof.load(Ordering::SeqCst) && n_retries < RETRY_MAX {
+                if !e.starts_with("404 ") && !ctx_clone.eof.load(Ordering::SeqCst) && try_no < MAX_TRIES {
                     {
     				    let mut guard = ctx_clone.http_client.lock().unwrap();
                         if (*guard).seqno == seqno {
                             // only do something if noone else took action.
                             debug!("invalidating server {} and scheduling retry {} because of {}",
-                                   ctx_clone.config.servers[seqno % ctx_clone.config.servers.len()], n_retries + 1, e);
+                                   ctx_clone.config.servers[seqno % ctx_clone.config.servers.len()], try_no + 1, e);
                             if e.starts_with("550 ") {
                                 // throw away hyper::Client
     				            (*guard).client.take();
@@ -183,11 +183,11 @@ fn get_with_retries(ctx: &Context, path: String, n_retries: u32) -> Box<Future<I
                                 (*guard).seqno += 1;
                             }
                         } else {
-                            debug!("scheduling retry {} because of {}", n_retries + 1, e);
+                            debug!("scheduling try {} because of {}", try_no + 1, e);
                         }
                     }
 					// and retry.
-                    return get_with_retries(&ctx_clone, path, n_retries + 1);
+                    return get_with_retries(&ctx_clone, path, try_no + 1);
                 } else {
                     return Box::new(future::ok(e));
                 }
@@ -196,7 +196,7 @@ fn get_with_retries(ctx: &Context, path: String, n_retries: u32) -> Box<Future<I
         Box::new(future::ok(Response::transform(body)))
     });
 
-    if n_retries > 0 {
+    if try_no > 0 {
         let when = Instant::now() + Duration::from_millis(RETRY_DELAY_MS);
         Box::new(Delay::new(when).then(move |_| resp))
     } else {

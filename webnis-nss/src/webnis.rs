@@ -9,6 +9,11 @@ use super::nss::{Passwd,Group,uid_t,gid_t,NssResult,NssError};
 
 static SOCKADDR: &'static str = "/var/run/webnis-bind.sock";
 
+const MAX_TRIES: u32 = 2;
+const RETRY_DELAY_MS: u64 = 2500;
+const REQUEST_READ_TIMEOUT_MS: u64 = 2500;
+const REQUEST_WRITE_TIMEOUT_MS: u64 = 1000;
+
 pub struct Webnis;
 
 impl Webnis {
@@ -56,8 +61,8 @@ fn wnbind_try(cmd: &str, arg: &str) -> NssResult<String> {
             return Err(e)?;
         },
     };
-    socket.set_read_timeout(Some(Duration::new(3, 0))).ok();
-    socket.set_write_timeout(Some(Duration::new(1, 0))).ok();
+    socket.set_read_timeout(Some(Duration::from_millis(REQUEST_READ_TIMEOUT_MS))).ok();
+    socket.set_write_timeout(Some(Duration::from_millis(REQUEST_WRITE_TIMEOUT_MS))).ok();
 
     // send request.
     let b = format!("{} {}\n", cmd, arg).into_bytes();
@@ -105,8 +110,7 @@ fn wnbind_try(cmd: &str, arg: &str) -> NssResult<String> {
 
 // call cmd_run and sleep/retry a few times if we fail.
 fn wnbind_get(cmd: &str, arg: &str) -> NssResult<String> {
-    let max_tries = 3;
-    for tries in 0 .. max_tries {
+    for tries in 0 .. MAX_TRIES {
         match wnbind_try(cmd, arg) {
             Ok(r) => {
                 if r.contains(0 as char) {
@@ -118,8 +122,8 @@ fn wnbind_get(cmd: &str, arg: &str) -> NssResult<String> {
             res @ Err(NssError::NotFound) => return res,
             Err(NssError::TimedOut) => {},
             _ => {
-                if tries < max_tries - 1 {
-                    sleep(Duration::new(3, 0));
+                if tries < MAX_TRIES - 1 {
+                    sleep(Duration::from_millis(RETRY_DELAY_MS));
                 }
             },
         }

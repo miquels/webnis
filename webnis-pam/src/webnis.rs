@@ -9,6 +9,11 @@ use pamsm::{self,PamServiceModule,PamError};
 
 static SOCKADDR: &'static str = "/var/run/webnis-bind.sock";
 
+const MAX_TRIES: u32 = 2;
+const RETRY_DELAY_MS: u64 = 2500;
+const REQUEST_READ_TIMEOUT_MS: u64 = 2500;
+const REQUEST_WRITE_TIMEOUT_MS: u64 = 1000;
+
 // lazy static so that a first call of DEBUG() initialises the debug logger.
 lazy_static! {
     static ref DEBUG: fn() -> () = {
@@ -85,8 +90,8 @@ fn wnbind_try(user: &str, pass: &[u8]) -> Result<(), PamError> {
             return Err(from_io_error(e));
         },
     };
-    socket.set_read_timeout(Some(Duration::new(3, 0))).ok();
-    socket.set_write_timeout(Some(Duration::new(1, 0))).ok();
+    socket.set_read_timeout(Some(Duration::from_millis(REQUEST_READ_TIMEOUT_MS))).ok();
+    socket.set_write_timeout(Some(Duration::from_millis(REQUEST_WRITE_TIMEOUT_MS))).ok();
 
     // send request.
     let mut b = format!("auth {} ", user).into_bytes();
@@ -134,14 +139,13 @@ fn wnbind_try(user: &str, pass: &[u8]) -> Result<(), PamError> {
 
 // call wnbind_try() and sleep/retry once if we fail.
 fn wnbind_auth(user: &str, pass: &[u8]) -> Result<(), PamError> {
-    let max_tries = 2;
-    for tries in 0 .. max_tries {
+    for tries in 0 .. MAX_TRIES {
         match wnbind_try(user, pass) {
             Ok(r) => return Ok(r),
             Err(PamError::AUTH_ERR) => return Err(PamError::AUTH_ERR),
             _ => {
-                if tries < max_tries - 1 {
-                    sleep(Duration::new(2, 500));
+                if tries < MAX_TRIES - 1 {
+                    sleep(Duration::from_millis(RETRY_DELAY_MS));
                 }
             },
         }
