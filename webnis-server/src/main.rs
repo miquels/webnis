@@ -12,6 +12,7 @@ extern crate http;
 extern crate libc;
 extern crate pwhash;
 extern crate routematcher;
+extern crate hyper_tls_hack;
 
 mod config;
 mod db;
@@ -21,7 +22,7 @@ use std::net::ToSocketAddrs;
 use std::process::exit;
 use std::sync::Arc;
 
-use futures::future;
+use futures::future::{self, Either};
 use hyper::rt::{self, Future};
 use hyper::{Body, Request, Response, Server, StatusCode, header};
 use hyper::service::{Service,NewService};
@@ -42,7 +43,13 @@ fn main() -> Result<(), Box<std::error::Error>> {
     ).get_matches();
     let cfg = matches.value_of("CFG").unwrap_or("/etc/webnis-server.toml");
 
-    let config = config::read(cfg)?;
+    let config = match config::read(cfg) {
+        Err(e) => {
+            eprintln!("{}: {}: {}", PROGNAME, cfg, e);
+            exit(1);
+        }
+        Ok(c) => c,
+    };
     if config.domain.len() == 0 {
         eprintln!("{}: no domains defined in {}", PROGNAME, cfg);
         exit(1);
@@ -74,14 +81,59 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let matcher = builder.compile();
     let webnis = Webnis::new(matcher, config.clone());
 
+    let tls_acceptor = if config.server.tls {
+        let f = match config.server.cert_file {
+            None => {
+                eprintln!("{}: [server] tls enabled, but cert_file not set", PROGNAME);
+                exit(1);
+            },
+            Some(ref f) => f,
+        };
+        match hyper_tls_hack::acceptor_from_file(f, &config.server.cert_password) {
+            Err(e) => {
+                eprintln!("{}: {}: {}", PROGNAME, f, e);
+                exit(1);
+            },
+            Ok(a) => Some(a),
+        }
+    } else {
+        None
+    };
+
     // start the servers.
     let mut servers = Vec::new();
     for sockaddr in config.server.listen.to_socket_addrs().unwrap() {
-        println!("Listening on http://{:?}", sockaddr);
-        let server = Server::try_bind(&sockaddr)?
-            .tcp_nodelay(true)
-            .serve(webnis.clone())
-            .map_err(|e| eprintln!("server error: {}", e));
+        let proto = if config.server.tls { "https" } else { "http" };
+        println!("Listening on {}://{:?}", proto, sockaddr);
+        let server = if config.server.tls {
+            let acceptor = tls_acceptor.as_ref().unwrap().clone();
+            let mut ai = match hyper_tls_hack::AddrIncoming::new(&sockaddr, acceptor, None) {
+                Err(e) => {
+                    eprintln!("{}: tlslistener on {:?}: {}", PROGNAME, &sockaddr, e);
+                    exit(1);
+                },
+                Ok(ai) => ai,
+            };
+            ai.set_nodelay(true);
+            Either::A(
+                Server::builder(ai)
+                    .serve(webnis.clone())
+                    .map_err(|e| eprintln!("https server error: {}", e))
+            )
+        } else {
+            Either::B(
+                match Server::try_bind(&sockaddr) {
+                    Err(e) => {
+                        eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
+                        exit(1);
+                    },
+                    Ok(s) => s,
+                }
+                .tcp_nodelay(true)
+                .serve(webnis.clone())
+                .map_err(|e| eprintln!("http server error: {}", e))
+            )
+        };
         servers.push(server);
     }
 

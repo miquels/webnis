@@ -25,7 +25,12 @@ pub struct Config {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Server {
-    pub listen:     OneOrManyAddr,
+    #[serde(default)]
+    pub tls:            bool,
+    pub cert_file:      Option<String>,
+    #[serde(default)]
+    pub cert_password:  String,
+    pub listen:         OneOrManyAddr,
 }
 
 #[derive(Deserialize, Debug, Clone)]

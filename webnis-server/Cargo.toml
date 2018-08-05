@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["mikevs <mikevs@xs4all.net>"]
 
 [dependencies]
+routematcher = { path = "routematcher" }
+hyper-tls-hack = { path = "../../hyper-tls-hack" }
+
 clap = "2.29.4"
 log = "0.4.3"
 env_logger = "0.5"
@@ -16,7 +19,7 @@ hyper = "0.12"
 hyper-tls = "0.3"
 toml = "0.4.6"
 http = "0.1.8"
-routematcher = { path = "routematcher" }
 gdbm = "0.1.1"
 libc = "0.2.42"
 pwhash = "0.2"
+

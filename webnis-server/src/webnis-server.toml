@@ -1,5 +1,8 @@
 [server]
   listen = [ "0.0.0.0:8245", "[::]:3333" ]
+  tls = true
+  cert_file = "/etc/ssl/private/wildcard.xs4all.nl.pfx"
+  cert_password = ""
 
 [[domain]]
   name = "xs4all.nl"
