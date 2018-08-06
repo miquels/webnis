@@ -13,6 +13,8 @@ extern crate libc;
 extern crate pwhash;
 extern crate routematcher;
 extern crate hyper_tls_hack;
+extern crate openssl;
+extern crate native_tls;
 
 pub(crate) mod config;
 pub(crate) mod db;
@@ -84,16 +86,17 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let webnis = Webnis::new(matcher, config.clone());
 
     let tls_acceptor = if config.server.tls {
-        let f = match config.server.cert_file {
-            None => {
-                eprintln!("{}: [server] tls enabled, but cert_file not set", PROGNAME);
-                exit(1);
-            },
-            Some(ref f) => f,
+        let tls_acceptor = if config.server.p12_file.is_some() {
+            hyper_tls_hack::acceptor_from_file(config.server.p12_file.unwrap(),
+                                               &config.server.cert_password)
+        } else {
+            acceptor_from_pem_files(config.server.key_file.unwrap(),
+                                    config.server.crt_file.unwrap(),
+                                    &config.server.cert_password)
         };
-        match hyper_tls_hack::acceptor_from_file(f, &config.server.cert_password) {
+        match tls_acceptor {
             Err(e) => {
-                eprintln!("{}: {}: {}", PROGNAME, f, e);
+                eprintln!("{}: {}", PROGNAME, e);
                 exit(1);
             },
             Ok(a) => Some(a),

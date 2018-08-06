@@ -22,4 +22,6 @@ http = "0.1.8"
 gdbm = "0.1.1"
 libc = "0.2.42"
 pwhash = "0.2"
+openssl = "0.10.11"
+native-tls = "0.2.1"
 

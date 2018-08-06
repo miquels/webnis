@@ -1126,6 +1126,8 @@ dependencies = [
  "hyper-tls-hack 0.1.0",
  "libc 0.2.42 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "native-tls 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "openssl 0.10.11 (registry+https://github.com/rust-lang/crates.io-index)",
  "pwhash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "routematcher 0.1.0",
  "serde 1.0.70 (registry+https://github.com/rust-lang/crates.io-index)",
