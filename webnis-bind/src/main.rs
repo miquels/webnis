@@ -139,7 +139,7 @@ fn main() {
             let (tx, rx) = mpsc::channel(0);
             let fut = reader.then(move |res| {
                 if let Err(_) = res {
-                    debug!("reader saw error, setting EOF flag in Context");
+                    //debug!("reader saw error, setting EOF flag in Context");
                     eof_clone.store(true, Ordering::SeqCst);
                 }
                 tx.clone().send(res)

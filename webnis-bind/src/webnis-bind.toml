@@ -7,7 +7,7 @@ password   = "webnis"
 
 # Server to use. Users servers = [ ... ] for multiple servers.
 #server     = "localhost:3333"
-servers     = [ "localhost:3333", "localhost:8245" ]
+servers     = [ "mikevs-dev.xs4all.net:3246", "mikevs-dev.xs4all.net:3245" ]
 #servers     = [ "www.xs4all.nl:3333", "smtp.xs4all.nl:8245" ]
 #servers    = [ "auth1.xs4all.nl", "auth2.xs4all.nl" ]
 
@@ -17,5 +17,5 @@ concurrency = 500
 # Force HTTP/2. Recommended. This always uses one TCP connection to the
 # server, regardless of the concurrency. If this is set, "concurrency"
 # is set to 100 minimal.
-#http2_only = true
+http2_only = true
 

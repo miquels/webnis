@@ -128,6 +128,7 @@ fn req_with_retries(ctx: &Context, path: String, body: Option<String>, try_no: u
         .uri(uri)
         .method(Method::GET)
         .method(if body.is_some() { Method::POST } else { Method::GET })
+        .header("content-type", if body.is_some() { "application/x-www-form-urlencoded" } else { "application/json" })
         .body(body.clone().map(|x| x.into()).unwrap_or(hyper::Body::empty()))
         .unwrap();
     let resp_body = client.request(request)
@@ -204,7 +205,7 @@ fn req_with_retries(ctx: &Context, path: String, body: Option<String>, try_no: u
         Box::new(future::ok(Response::transform(resp_body)))
     });
 
-    if try_no > 0 {
+    if try_no > 1 {
         let when = Instant::now() + Duration::from_millis(RETRY_DELAY_MS);
         Box::new(Delay::new(when).then(move |_| resp))
     } else {
