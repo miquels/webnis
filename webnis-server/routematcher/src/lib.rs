@@ -28,12 +28,14 @@
 #[macro_use] extern crate lazy_static;
 extern crate regex;
 extern crate http;
+extern crate serde_json;
 
+use std::io;
 use std::collections::HashMap;
 use std::cell::RefCell;
 
 use regex::{RegexSet,Regex,Captures};
-use http::{Method,Request};
+use http::{header,Method,Request,Response,StatusCode};
 
 /// A Matcher stores all the route-patterns that we can match on.
 /// ```ignore
@@ -63,8 +65,19 @@ pub struct Builder {
     inner:              RefCell<Matcher>,
 }
 
-struct MDecodedPath(String);
-struct MDecodedQuery(String);
+#[derive(Debug,Default)]
+struct MatchState {
+    decoded_path:   String,
+    decoded_query:  Option<String>,
+    query_offsets:  Option<Vec<(usize, usize, usize)>>,
+    route_index:    usize,
+    body_params:    Option<HashMap<String, String>>,
+}
+
+fn has_body<T>(req: &Request<T>) -> bool {
+    req.headers().contains_key("content-length") ||
+    req.headers().contains_key("transfer-encoding")
+}
 
 impl Builder {
 
@@ -79,19 +92,6 @@ impl Builder {
                 encoded_slashes_ok: false,
         };
         Builder{ inner: RefCell::new(m) }
-
-        /*
-        Builder {
-            inner:  RefCell::new(Matcher{
-                routes_pat:         Vec::new(),
-                routes_re:          Vec::new(),
-                set:                None,
-                labels:             HashMap::new(),
-                methods:            HashMap::new(),
-                encoded_slashes_ok: false,
-            })
-        }
-        */
     }
 
     /// Add a route to a matcher.
@@ -140,64 +140,220 @@ impl Builder {
 }
 
 impl Matcher {
-    /// Match a request and return the match (if any).
-    pub fn match_req<'a, 'b: 'a, T>(&'a self, req: &'b mut Request<T>) -> Option<Match<'a>> {
+    /// Preflight check: see if request is sane and match our routes. Stores
+    /// the state it builds internally in the request, so that_req later
+    /// on does not have to do the same work again.
+    ///
+    /// Can return status codes:
+    /// ```
+    /// StatusCode::BAD_REQUEST         could not find/decode path in request
+    /// StatusCode::NOT_FOUND           no match found
+    /// StatusCode::METHOD_NOT_ALLOWED  match found, but not for request method.
+    /// ```
+    pub fn preflight<T>(&self, req: &mut Request<T>) -> Result<(), StatusCode> {
 
-        // first decode path and store it in the request.
+        if req.extensions().get::<MatchState>().is_some() {
+            return Ok(());
+        }
+        let mut state = MatchState::default();
+
+        // decode path and store it in the request.
         let path = match percent_decode_utf8(req.uri().path()) {
             (Some(path), slash) => {
                 if slash && !self.encoded_slashes_ok {
-                    return None;
+                    return Err(StatusCode::BAD_REQUEST);
                 }
                 path
             },
-            (None, _) => return None,
+            (None, _) => return Err(StatusCode::BAD_REQUEST),
         };
-        req.extensions_mut().insert(MDecodedPath(path));
+        state.decoded_path = path;
+
+        // Some extra test in case this is a POST, so we can rely on the fact
+        // that the request has a valid body later on.
+        if req.method() == &Method::POST {
+            if !has_body(&req) {
+                return Err(StatusCode::LENGTH_REQUIRED);
+            }
+            let type_ok = match req.headers().get("content-type") {
+                Some(h) => h.to_str().unwrap_or("").contains("application/x-www-form-urlencoded") ||
+                           h.to_str().unwrap_or("").contains("application/json"),
+                None => false,
+            };
+            if !type_ok {
+                return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+            }
+        }
 
         // Now decode the query. If we needed to allocate a fresh buffer
         // because of percent-encoding, store that buffer in the request.
         let (query_offsets, buffer) = decode_query_get_offsets(req.uri().query());
-        if let Some(buffer) = buffer {
-            req.extensions_mut().insert(MDecodedQuery(buffer));
-        }
+        state.decoded_query = buffer;
+        state.query_offsets = query_offsets;
 
         // get a list of matching routes.
-        let path = &req.extensions().get::<MDecodedPath>().unwrap().0;
-        let matched = self.set.as_ref().unwrap().matches(path);
+        let matched = self.set.as_ref().unwrap().matches(&state.decoded_path);
 
-        // now find the first route that matches the method.
         let mut n = None;
-        let reqm = req.method();
-        let methods = &self.methods;
-        for idx in matched.into_iter() {
-            match methods.get(&idx) {
-                None => {
-                    n = Some(idx);
-                    break;
-                },
-                Some(mlist) => {
-                    if mlist.iter().find(|m| m == reqm).is_some() {
+        let mut status = StatusCode::NOT_FOUND;
+        // NLL ident.
+        {
+            // now find the first route that matches the method.
+            let reqm = req.method();
+            let methods = &self.methods;
+            for idx in matched.into_iter() {
+                match methods.get(&idx) {
+                    None => {
                         n = Some(idx);
                         break;
-                    }
-                },
+                    },
+                    Some(mlist) => {
+                        if mlist.iter().find(|m| m == reqm).is_some() {
+                            n = Some(idx);
+                            break;
+                        }
+                        status = StatusCode::METHOD_NOT_ALLOWED;
+                    },
+                }
             }
         }
 
-        if let Some(n) = n {
-            // pattern "n" matches. Run regexp "n" and return result.
-            if let Some(caps) = self.routes_re[n].captures(path) {
-                let label = self.labels.get(&n).as_ref().map(|s| s.as_str());
-                return Some(Match{
-                    caps: caps,
-                    idx: n,
-                    label: label,
-                    query_params: map_query_params(req, query_offsets),
-                });
-            }
+        // on no match return with an error.
+        let n = match n {
+            None => return Err(status),
+            Some(n) => n,
+        };
+
+
+        state.route_index = n;
+        req.extensions_mut().insert(state);
+        Ok(())
+    }
+
+    /// Match a request and return the match. Errors can be:
+    /// ```
+    /// StatusCode::BAD_REQUEST         could not find/decode path in request
+    /// StatusCode::NOT_FOUND           no match found
+    /// StatusCode::METHOD_NOT_ALLOWED  match found, but not for request method.
+    /// ```
+    pub fn match_req<'a, 'b: 'a, T>(&'a self, req: &'b mut Request<T>) -> Result<Match<'a>, StatusCode> {
+
+        self.preflight(req)?;
+        let state = req.extensions().get::<MatchState>().unwrap();
+        let n = state.route_index;
+
+        // pattern "n" matches. Run regexp "n" and return result.
+        if let Some(caps) = self.routes_re[n].captures(&state.decoded_path) {
+            let label = self.labels.get(&n).as_ref().map(|s| s.as_str());
+            return Ok(Match{
+                caps: caps,
+                idx: n,
+                label: label,
+                query_params: map_query_params(req, state.query_offsets.as_ref()),
+                body_params: state.body_params.as_ref(),
+            });
         }
-        None
+
+        // never reached.
+        Err(StatusCode::INTERNAL_SERVER_ERROR)
+    }
+
+    /// This is like preflight(), but it returns a Response on error. Makes it
+    /// easy to quickly return errors on no match, for example:
+    /// ```no_run
+    /// if let Err(resp) = matcher.preflight_resp(req) {
+    ///     return Box::new(future::ok(resp));
+    /// }
+    /// ```      
+    pub fn preflight_resp<T>(&self, req: &mut Request<T>) -> Result<(), Response<T>>
+        where T: std::convert::From<String> {
+
+        let body_maybe = has_body(&req) ||
+            req.method() == &Method::PUT ||
+            req.method() == &Method::POST;
+
+        let status = match self.preflight(req) {
+            Ok(r) => return Ok(r),
+            Err(status) => status,
+        };
+
+        let mut bldr = Response::builder();
+        if body_maybe {
+               // it contains a body but we haven't read it- and aren't going
+               // to, so tell hyper to close the current connection.
+               bldr.header(header::CONNECTION, "close");
+        }
+        let msg = status.canonical_reason().unwrap_or(status.as_str()).to_string();
+        bldr
+            .header(header::CONTENT_TYPE, "text/plain")
+            .status(status);
+        Err(bldr.body(msg.into()).unwrap())
+    }
+
+    /// This is like match_req(), but it returns a Response on error. Makes it
+    /// easy to quickly return errors on no match, for example:
+    /// ```no_run
+    /// let m = match matcher.match_req_resp(req) {
+    ///     Ok(m) => m,
+    ///     Err(resp) => {
+    ///         return Box::new(future::ok(resp));
+    ///     }
+    /// };
+    /// ```      
+    pub fn match_req_resp<'a, 'b: 'a, T>(&'a self, req: &'b mut Request<T>) -> Result<Match<'a>, Response<T>>
+        where T: std::convert::From<String> {
+
+        if let Err(resp) = self.preflight_resp(req) {
+            return Err(resp);
+        }
+
+        let status = match self.match_req(req) {
+            Ok(r) => return Ok(r),
+            Err(status) => status,
+        };
+
+        let mut bldr = Response::builder();
+        let msg = status.canonical_reason().unwrap_or(status.as_str()).to_string();
+
+        Err(bldr
+            .header(header::CONTENT_TYPE, "text/plain")
+            .status(status)
+            .body(msg.into()).unwrap())
+    }
+
+    pub fn parse_body<T>(&self, req: &mut Request<T>, data: &[u8]) -> Result<(), io::Error> {
+        #[derive(PartialEq)]
+        enum CT {
+            Form,
+            Json,
+            NotFound,
+        };
+        let ct = match req.headers().get("content-type") {
+            None => CT::NotFound,
+            Some(ct) => {
+                let s = ct.to_str().unwrap_or("");
+                if s.contains("application/x-www-form-urlencoded") {
+                    CT::Form
+                }
+                else if s.contains("application/json") {
+                    CT::Json
+                }
+                else {
+                    CT::NotFound
+                }
+            },
+        };
+        let state = req.extensions_mut().get_mut::<MatchState>().unwrap();
+        match ct {
+            CT::Json => {
+                state.body_params = Some(serde_json::from_slice(data)
+                    .map_err(|_| io::Error::new(io::ErrorKind::Other, "json deserialization fail"))?);
+                return Ok(());
+            },
+            _ => {},
+        }
+
+        Err(io::Error::new(io::ErrorKind::Other, "body contents fail"))
     }
 }
 
@@ -230,6 +386,7 @@ pub struct Match<'a> {
     label:          Option<&'a str>,
     caps:           Captures<'a>,
     query_params:   Option<HashMap<&'a str, &'a str>>,
+    body_params:    Option<&'a HashMap<String, String>>,
 }
 
 impl<'a> Match<'a> {
@@ -251,6 +408,17 @@ impl<'a> Match<'a> {
         if let Some(ref m) = self.query_params {
             if let Some(r) = m.get(s) {
                 let r :&str = *r;
+                return Some(r);
+            }
+        }
+        None
+    }
+
+    /// Look up a body parameter.
+    pub fn body_param(&self, s: &str) -> Option<&'a str> {
+        if let Some(ref m) = self.body_params {
+            if let Some(r) = m.get(s) {
+                let r :&str = r.as_str();
                 return Some(r);
             }
         }
@@ -475,21 +643,21 @@ fn decode_query_get_offsets(s: Option<&str>) -> (Option<Vec<(usize, usize, usize
 
 // Lookup the (perhaps decoded) query string, and build a hashmap of
 // key/value parameters based on the offsets.
-fn map_query_params<'a, T>(req: &'a Request<T>, offsets: Option<Vec<(usize, usize, usize)>>) -> Option<HashMap<&'a str, &'a str>> {
+fn map_query_params<'a, T>(req: &'a Request<T>, offsets: Option<&Vec<(usize, usize, usize)>>) -> Option<HashMap<&'a str, &'a str>> {
 
     // If offsets is None, return now.
     let offsets = offsets?;
 
     // If we decoded the query string into a buffer, use the buffer,
     // otherwise use the plain query string from the request.
-    let q = match req.extensions().get::<MDecodedQuery>() {
-        None => req.uri().query().unwrap(),
-        Some(mdq) => &mdq.0,
+    let q = match req.extensions().get::<MatchState>() {
+        Some(state) if state.decoded_query.is_some() => state.decoded_query.as_ref().unwrap(),
+        _ => req.uri().query().unwrap(),
     };
 
     // Create the hashmap.
     let mut map = HashMap::new();
-    for &(start, equal, end) in &offsets {
+    for &(start, equal, end) in offsets {
         let key = &q[start..equal];
         let val = if end > equal + 1 { &q[equal+1..end] } else { "" };
         map.insert(key, val);
