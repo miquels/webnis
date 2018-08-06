@@ -84,7 +84,7 @@ impl Webnis {
 
         // Get query parameters.
         // XXX FIXME password should be Vec<u8> really since we cannot assume it's valid utf8!
-        let (login, password) = match (mat.body_param("login"), mat.body_param("password")) {
+        let (login, password) = match (mat.body_param("login"), mat.body_param_bytes("password")) {
             (Some(l), Some(p)) => (l, p),
             _ => return json_error(StatusCode::BAD_REQUEST, None, "Body parameters missing"),
         };
@@ -208,7 +208,7 @@ impl Webnis {
         json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Unsupported database format")
     }
 
-    pub fn auth_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str, passwd: &str) -> BoxedFuture {
+    pub fn auth_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str, passwd: &[u8]) -> BoxedFuture {
         // do map lookup.
         let res = match map.map_type.as_str() {
             "gdbm" => self.lookup_gdbm_map(dom, map, keyval),

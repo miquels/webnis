@@ -10,6 +10,7 @@ use url::percent_encoding::{
 };
 use hyper;
 use hyper::client::HttpConnector;
+use hyper::Method;
 use hyper_tls::HttpsConnector;
 use tokio::prelude::*;
 use tokio::timer::Delay;
@@ -36,11 +37,12 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
 
     if request.cmd == Cmd::Auth {
         // authentication
-        let path = format!("/{}/auth?login={}&password={}",
-                        utf8_percent_encode(&ctx.config.domain, DEFAULT_ENCODE_SET),
+        let path = format!("/{}/auth",
+                        utf8_percent_encode(&ctx.config.domain, DEFAULT_ENCODE_SET));
+        let body = format!("login={}&password={}",
                         utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET),
                         utf8_percent_encode(&request.args[1], QUERY_ENCODE_SET));
-        return get_with_retries(&ctx, path, 1)
+        return req_with_retries(&ctx, path, Some(body), 1)
     }
 
     // map lookup
@@ -57,7 +59,7 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
                 utf8_percent_encode(map, DEFAULT_ENCODE_SET),
                 utf8_percent_encode(param, QUERY_ENCODE_SET),
                 utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET));
-    get_with_retries(&ctx, path, 0)
+    req_with_retries(&ctx, path, None, 0)
 }
 
 // build a hyper::Uri from a host and a path.
@@ -102,7 +104,7 @@ fn new_client(config: &super::config::Config) -> hyper::Client<HttpsConnector<Ht
 // https://github.com/hyperium/hyper/issues/1422
 // https://github.com/rust-lang/rust/issues/47955
 //
-fn get_with_retries(ctx: &Context, path: String, try_no: u32) -> Box<Future<Item=String, Error=io::Error> + Send> {
+fn req_with_retries(ctx: &Context, path: String, body: Option<String>, try_no: u32) -> Box<Future<Item=String, Error=io::Error> + Send> {
 
     let ctx_clone = ctx.clone();
 
@@ -122,7 +124,13 @@ fn get_with_retries(ctx: &Context, path: String, try_no: u32) -> Box<Future<Item
     let server = &ctx.config.servers[seqno % ctx.config.servers.len()];
     let uri = build_uri(server, &path);
 
-    let body = client.get(uri)
+    let request = hyper::Request::builder()
+        .uri(uri)
+        .method(Method::GET)
+        .method(if body.is_some() { Method::POST } else { Method::GET })
+        .body(body.clone().map(|x| x.into()).unwrap_or(hyper::Body::empty()))
+        .unwrap();
+    let resp_body = client.request(request)
     .map_err(|e| {
         // something went very wrong. mark it with code 550 so that at the
         // end of the future chain we can detect it and retry.
@@ -155,7 +163,7 @@ fn get_with_retries(ctx: &Context, path: String, try_no: u32) -> Box<Future<Item
 
     // add a timeout. need to have an answer in 1 second.
     let timeout = Instant::now() + Duration::from_millis(REQUEST_TIMEOUT_MS);
-    let body_tmout_wrapper = body.deadline(timeout).map_err(|e| {
+    let body_tmout_wrapper = resp_body.deadline(timeout).map_err(|e| {
         debug!("timeout wrapper: error on {}", e);
         match e.into_inner() {
             Some(e) => e,
@@ -165,7 +173,7 @@ fn get_with_retries(ctx: &Context, path: String, try_no: u32) -> Box<Future<Item
 
     let resp =
     body_tmout_wrapper.then(move |res| {
-        let body = match res {
+        let resp_body = match res {
             Ok(body) => body,
             Err(e) => {
                 if !e.starts_with("404 ") && !ctx_clone.eof.load(Ordering::SeqCst) && try_no < MAX_TRIES {
@@ -187,13 +195,13 @@ fn get_with_retries(ctx: &Context, path: String, try_no: u32) -> Box<Future<Item
                         }
                     }
 					// and retry.
-                    return get_with_retries(&ctx_clone, path, try_no + 1);
+                    return req_with_retries(&ctx_clone, path, body, try_no + 1);
                 } else {
                     return Box::new(future::ok(e));
                 }
             },
         };
-        Box::new(future::ok(Response::transform(body)))
+        Box::new(future::ok(Response::transform(resp_body)))
     });
 
     if try_no > 0 {
