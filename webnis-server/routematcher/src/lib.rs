@@ -33,6 +33,7 @@ extern crate serde_json;
 use std::io;
 use std::collections::HashMap;
 use std::cell::RefCell;
+use std::iter::FromIterator;
 
 use regex::{RegexSet,Regex,Captures};
 use http::{header,Method,Request,Response,StatusCode};
@@ -71,7 +72,7 @@ struct MatchState {
     decoded_query:  Option<String>,
     query_offsets:  Option<Vec<(usize, usize, usize)>>,
     route_index:    usize,
-    body_params:    Option<HashMap<String, String>>,
+    body_params:    Option<HashMap<Vec<u8>, Vec<u8>>>,
 }
 
 fn has_body<T>(req: &Request<T>) -> bool {
@@ -345,9 +346,21 @@ impl Matcher {
         };
         let state = req.extensions_mut().get_mut::<MatchState>().unwrap();
         match ct {
+            CT::Form => {
+                let mut hm : HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+                data.split(|&b| b == b'&').for_each(|kv| {
+                    let mut x = kv.splitn(2, |&b| b == b'=');
+                    hm.insert(x.next().unwrap().to_vec(), x.next().unwrap_or(b"").to_vec());
+				});
+				state.body_params = Some(hm);
+                return Ok(());
+			},
             CT::Json => {
-                state.body_params = Some(serde_json::from_slice(data)
-                    .map_err(|_| io::Error::new(io::ErrorKind::Other, "json deserialization fail"))?);
+                let v : HashMap<String, String> = serde_json::from_slice(data)
+                    .map_err(|_| io::Error::new(io::ErrorKind::Other, "json deserialization fail"))?;
+                let b_iter = v.into_iter().map(|(k, v)| (k.into_bytes(), v.into_bytes()));
+                let hm : HashMap<_,_> = HashMap::from_iter(b_iter);
+				state.body_params = Some(hm);
                 return Ok(());
             },
             _ => {},
@@ -386,7 +399,7 @@ pub struct Match<'a> {
     label:          Option<&'a str>,
     caps:           Captures<'a>,
     query_params:   Option<HashMap<&'a str, &'a str>>,
-    body_params:    Option<&'a HashMap<String, String>>,
+    body_params:    Option<&'a HashMap<Vec<u8>, Vec<u8>>>,
 }
 
 impl<'a> Match<'a> {
@@ -417,8 +430,18 @@ impl<'a> Match<'a> {
     /// Look up a body parameter.
     pub fn body_param(&self, s: &str) -> Option<&'a str> {
         if let Some(ref m) = self.body_params {
-            if let Some(r) = m.get(s) {
-                let r :&str = r.as_str();
+            if let Some(r) = m.get(s.as_bytes()) {
+                return std::str::from_utf8(r).ok();
+            }
+        }
+        None
+    }
+
+    /// Look up a body parameter. Body parameters in the application/x-www-form-urlencoded
+    /// encoding are binary, and do not have to be an utf-8 string. Return a &[u8].
+    pub fn body_param_bytes(&self, s: &str) -> Option<&'a [u8]> {
+        if let Some(ref m) = self.body_params {
+            if let Some(r) = m.get(s.as_bytes()) {
                 return Some(r);
             }
         }
