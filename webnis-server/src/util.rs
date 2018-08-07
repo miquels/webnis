@@ -130,7 +130,6 @@ pub fn check_basic_auth(hdrs: &HeaderMap<HeaderValue>, login: Option<&str>, pass
         Some(v) => v,
     };
     // split into name and password.
-    debug!("got basic auth {}", s);
     let w = s.splitn(2, ':').collect::<Vec<&str>>();
     if w.len() != 2 {
         return AuthResult::BadAuth;

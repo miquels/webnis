@@ -10,11 +10,12 @@ use url::percent_encoding::{
 };
 use hyper;
 use hyper::client::HttpConnector;
-use hyper::Method;
+use hyper::{header,Method};
 use hyper_tls::HttpsConnector;
 use tokio::prelude::*;
 use tokio::timer::Delay;
 use futures::future;
+use base64;
 
 use super::Context;
 use super::response::Response;
@@ -35,6 +36,9 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
         Err(e) => return Box::new(future::ok(Response::error(400, &e))),
     };
 
+    let user_pass = format!(":{}", ctx.config.password);
+    let authorization = format!("Basic {}", base64::encode(&user_pass));
+
     if request.cmd == Cmd::Auth {
         // authentication
         // note that the password has already been percent encoded by
@@ -44,7 +48,7 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
         let body = format!("login={}&password={}",
                         utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET),
                         request.args[1]);
-        return req_with_retries(&ctx, path, Some(body), 1)
+        return req_with_retries(&ctx, path, authorization, Some(body), 1)
     }
 
     // map lookup
@@ -61,7 +65,7 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
                 utf8_percent_encode(map, DEFAULT_ENCODE_SET),
                 utf8_percent_encode(param, QUERY_ENCODE_SET),
                 utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET));
-    req_with_retries(&ctx, path, None, 0)
+    req_with_retries(&ctx, path, authorization, None, 0)
 }
 
 // build a hyper::Uri from a host and a path.
@@ -106,7 +110,7 @@ fn new_client(config: &super::config::Config) -> hyper::Client<HttpsConnector<Ht
 // https://github.com/hyperium/hyper/issues/1422
 // https://github.com/rust-lang/rust/issues/47955
 //
-fn req_with_retries(ctx: &Context, path: String, body: Option<String>, try_no: u32) -> Box<Future<Item=String, Error=io::Error> + Send> {
+fn req_with_retries(ctx: &Context, path: String, authorization: String, body: Option<String>, try_no: u32) -> Box<Future<Item=String, Error=io::Error> + Send> {
 
     let ctx_clone = ctx.clone();
 
@@ -125,14 +129,20 @@ fn req_with_retries(ctx: &Context, path: String, body: Option<String>, try_no: u
     // build the uri based on the currently active webnis server.
     let server = &ctx.config.servers[seqno % ctx.config.servers.len()];
     let uri = build_uri(server, &path);
+    let method = if body.is_some() { Method::POST } else { Method::GET };
 
-    let request = hyper::Request::builder()
+    let mut builder = hyper::Request::builder();
+    builder
         .uri(uri)
-        .method(Method::GET)
-        .method(if body.is_some() { Method::POST } else { Method::GET })
-        .header("content-type", if body.is_some() { "application/x-www-form-urlencoded" } else { "application/json" })
+        .method(method)
+        .header(header::AUTHORIZATION, authorization.as_str());
+    if body.is_some() {
+        builder.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    }
+    let request = builder
         .body(body.clone().map(|x| x.into()).unwrap_or(hyper::Body::empty()))
         .unwrap();
+
     let resp_body = client.request(request)
     .map_err(|e| {
         // something went very wrong. mark it with code 550 so that at the
@@ -145,7 +155,7 @@ fn req_with_retries(ctx: &Context, path: String, body: Option<String>, try_no: u
     })
     .and_then(|res| {
         // see if response is what we expected
-        let is_json = res.headers().get("content-type").map(|h| h == "application/json").unwrap_or(false);
+        let is_json = res.headers().get(header::CONTENT_TYPE).map(|h| h == "application/json").unwrap_or(false);
         if !is_json {
             if res.status().is_success() {
                 future::err(Response::error(416, "expected application/json"))
@@ -167,7 +177,7 @@ fn req_with_retries(ctx: &Context, path: String, body: Option<String>, try_no: u
     // add a timeout. need to have an answer in 1 second.
     let timeout = Instant::now() + Duration::from_millis(REQUEST_TIMEOUT_MS);
     let body_tmout_wrapper = resp_body.deadline(timeout).map_err(|e| {
-        debug!("timeout wrapper: error on {}", e);
+        debug!("got error {}", e);
         match e.into_inner() {
             Some(e) => e,
             None => Response::error(408, "request timeout"),
@@ -179,7 +189,11 @@ fn req_with_retries(ctx: &Context, path: String, body: Option<String>, try_no: u
         let resp_body = match res {
             Ok(body) => body,
             Err(e) => {
-                if !e.starts_with("404 ") && !ctx_clone.eof.load(Ordering::SeqCst) && try_no < MAX_TRIES {
+                if !e.starts_with("401 ") &&
+                   !e.starts_with("403 ") &&
+                   !e.starts_with("404 ") &&
+                   !ctx_clone.eof.load(Ordering::SeqCst) &&
+                   try_no < MAX_TRIES {
                     {
     				    let mut guard = ctx_clone.http_client.lock().unwrap();
                         if (*guard).seqno == seqno {
@@ -198,7 +212,7 @@ fn req_with_retries(ctx: &Context, path: String, body: Option<String>, try_no: u
                         }
                     }
 					// and retry.
-                    return req_with_retries(&ctx_clone, path, body, try_no + 1);
+                    return req_with_retries(&ctx_clone, path, authorization, body, try_no + 1);
                 } else {
                     return Box::new(future::ok(e));
                 }

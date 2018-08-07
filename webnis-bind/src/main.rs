@@ -15,6 +15,7 @@ extern crate env_logger;
 extern crate toml;
 extern crate libc;
 extern crate tk_listen;
+extern crate base64;
 
 mod config;
 mod request;
