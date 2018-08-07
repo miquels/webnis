@@ -60,11 +60,12 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
         Cmd::GetGidList => ("gidlist", "name"),
         _ => unreachable!(),
     };
-    let path = format!("/{}/map/{}?{}={}",
+    let path = format!("/{}/map/{}?{}={}&cred_uid={}",
                 utf8_percent_encode(&ctx.config.domain, DEFAULT_ENCODE_SET),
                 utf8_percent_encode(map, DEFAULT_ENCODE_SET),
                 utf8_percent_encode(param, QUERY_ENCODE_SET),
-                utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET));
+                utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET),
+                ctx.uid);
     req_with_retries(&ctx, path, authorization, None, 0)
 }
 
