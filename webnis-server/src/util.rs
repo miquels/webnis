@@ -34,6 +34,7 @@ pub(crate) fn json_error(outer_code: StatusCode, inner_code: Option<StatusCode>,
             "message":  msg,
         }
     });
+    debug!("{}", body);
     let body = body.to_string() + "\n";
 
     let r = Response::builder()

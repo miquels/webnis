@@ -5,6 +5,11 @@ use std::io::{BufRead,BufReader};
 use std::thread::sleep;
 use std::io::Write;
 
+use percent_encoding::{
+    percent_encode,
+    QUERY_ENCODE_SET
+};
+
 use pamsm::{self,PamServiceModule,PamError};
 
 static SOCKADDR: &'static str = "/var/run/webnis-bind.sock";
@@ -70,9 +75,10 @@ impl PamServiceModule for Webnis {
             Ok(None) => return PamError::AUTH_ERR,
             Err(e) => return e,
         };
+        let pass : String = percent_encode(&pass, QUERY_ENCODE_SET).collect();
 
         // run authentication.
-        match wnbind_auth(user, pass) {
+        match wnbind_auth(user, &pass) {
             Ok(_) => PamError::SUCCESS,
             Err(e) => e,
         }
@@ -80,7 +86,7 @@ impl PamServiceModule for Webnis {
 }
 
 // open socket, auth once, read reply, return.
-fn wnbind_try(user: &str, pass: &[u8]) -> Result<(), PamError> {
+fn wnbind_try(user: &str, pass: &str) -> Result<(), PamError> {
 
     // connect to webnis-bind.
     let mut socket = match UnixStream::connect(SOCKADDR) {
@@ -94,9 +100,7 @@ fn wnbind_try(user: &str, pass: &[u8]) -> Result<(), PamError> {
     socket.set_write_timeout(Some(Duration::from_millis(REQUEST_WRITE_TIMEOUT_MS))).ok();
 
     // send request.
-    let mut b = format!("auth {} ", user).into_bytes();
-    b.extend(pass);
-    b.push(b'\n');
+    let b = format!("auth {} {}\n", user, pass).into_bytes();
     if let Err(e) = socket.write_all(&b) {
         debug!("write to {}: {}", SOCKADDR, e);
         return Err(from_io_error(e));
@@ -138,7 +142,7 @@ fn wnbind_try(user: &str, pass: &[u8]) -> Result<(), PamError> {
 }
 
 // call wnbind_try() and sleep/retry once if we fail.
-fn wnbind_auth(user: &str, pass: &[u8]) -> Result<(), PamError> {
+fn wnbind_auth(user: &str, pass: &str) -> Result<(), PamError> {
     for tries in 0 .. MAX_TRIES {
         match wnbind_try(user, pass) {
             Ok(r) => return Ok(r),

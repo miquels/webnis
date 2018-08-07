@@ -348,6 +348,7 @@ impl Matcher {
         match ct {
             CT::Form => {
                 let mut hm : HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+                let data = percent_decode(data);
                 data.split(|&b| b == b'&').for_each(|kv| {
                     let mut x = kv.splitn(2, |&b| b == b'=');
                     hm.insert(x.next().unwrap().to_vec(), x.next().unwrap_or(b"").to_vec());
@@ -506,6 +507,12 @@ impl<'a> PercentDecoder<'a> {
             bytes: input.as_bytes().iter(),
         }
     }
+    #[inline]
+    fn from_bytes(input: &'a [u8]) -> PercentDecoder<'a> {
+        PercentDecoder {
+            bytes: input.iter(),
+        }
+    }
 }
 
 // iterator helper.
@@ -571,6 +578,20 @@ fn percent_decode_utf8(s: &str) -> (Option<String>, bool) {
     }
 
     (String::from_utf8(v).ok(), encoded_slash)
+}
+
+// Decode a percent-encoded &[u8] into bytes.
+fn percent_decode(s: &[u8]) -> Vec<u8> {
+    let n = s.iter().filter(|&&c| c == b'%').count();
+    let c = if s.len() > 2*n { s.len() - 2*n } else { 8 };
+    let mut v = Vec::with_capacity(c);
+
+    let iterator = PercentDecoder::from_bytes(s);
+    for (_, byte) in iterator {
+        v.push(byte);
+    }
+
+    v
 }
 
 // Walk over the query string, percent-decoding as we go. Remember the

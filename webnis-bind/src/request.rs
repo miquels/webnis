@@ -37,11 +37,13 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
 
     if request.cmd == Cmd::Auth {
         // authentication
+        // note that the password has already been percent encoded by
+        // the client (webnis-pam), we do not have to encode again.
         let path = format!("/{}/auth",
                         utf8_percent_encode(&ctx.config.domain, DEFAULT_ENCODE_SET));
         let body = format!("login={}&password={}",
                         utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET),
-                        utf8_percent_encode(&request.args[1], QUERY_ENCODE_SET));
+                        request.args[1]);
         return req_with_retries(&ctx, path, Some(body), 1)
     }
 
