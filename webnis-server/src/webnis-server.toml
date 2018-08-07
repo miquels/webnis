@@ -6,6 +6,7 @@
 
 [[domain]]
   name = "xs4all.nl"
+  password = "donkey jaw"
   db_dir = "/var/yp/xs4all.nl"
   maps = [ "passwd", "group", "gidlist" ]
   default = true

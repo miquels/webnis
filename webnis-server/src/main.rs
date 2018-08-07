@@ -15,6 +15,7 @@ extern crate routematcher;
 extern crate hyper_tls_hack;
 extern crate openssl;
 extern crate native_tls;
+extern crate base64;
 
 pub(crate) mod config;
 pub(crate) mod db;

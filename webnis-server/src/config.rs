@@ -37,10 +37,16 @@ pub struct Server {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Domain {
+    /// domain name
     pub name:       String,
+    /// database directory
     pub db_dir:     String,
+    /// available (allowed) maps
     pub maps:       Vec<String>,
+    /// link to the authentication method/map
     pub auth:       Option<String>,
+    /// password needed to allow access to this domain
+    pub password:   Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

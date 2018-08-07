@@ -4,6 +4,8 @@ use std::io::{Error,ErrorKind};
 use std::path::Path;
 
 use hyper::{header,Body,Response,StatusCode};
+use http::header::{HeaderMap,HeaderValue};
+
 use futures::{future,Future};
 
 use serde_json;
@@ -14,16 +16,30 @@ use openssl::pkcs12::Pkcs12;
 use openssl::stack::Stack;
 use native_tls::{Identity,TlsAcceptor};
 
+use base64;
+
 pub(crate) type BoxedError = Box<::std::error::Error + Send + Sync>;
 pub(crate) type BoxedFuture = Box<Future<Item=Response<Body>, Error=BoxedError> + Send>;
 
 // helpers.
 pub(crate) fn http_error(code: StatusCode, msg: &'static str) -> BoxedFuture {
+    debug!("{}", msg);
     let msg = msg.to_string() + "\n";
     let r = Response::builder()
         .header(header::CONTENT_TYPE, "text/plain")
         .status(code)
         .body(msg.into()).unwrap();
+    Box::new(future::ok(r))
+}
+
+// helpers.
+pub(crate) fn http_unauthorized() -> BoxedFuture {
+    debug!("401 Unauthorized");
+    let r = Response::builder()
+        .header(header::CONTENT_TYPE, "text/plain")
+        .header(header::WWW_AUTHENTICATE, "Basic realm=\"webnis\"")
+        .status(StatusCode::UNAUTHORIZED)
+        .body("Unauthorized - send basic auth\n".into()).unwrap();
     Box::new(future::ok(r))
 }
 
@@ -84,5 +100,46 @@ pub fn acceptor_from_pem_files(key: impl AsRef<Path>, cert: impl AsRef<Path>, pa
     let identity = read_pems(key, cert, password)?;
     let identity = Identity::from_pkcs12(&identity, "").map_err(|e| Error::new(ErrorKind::Other, e))?;
     TlsAcceptor::new(identity).map_err(|e| Error::new(ErrorKind::Other, e))
+}
+
+#[derive(Debug,PartialEq)]
+pub enum AuthResult {
+    // no (matching) authorization header
+    NoAuth,
+    // login incorrect
+    BadAuth,
+    // come on in
+    AuthOk,
+}
+
+/// Check basic authentication.
+pub fn check_basic_auth(hdrs: &HeaderMap<HeaderValue>, login: Option<&str>, password: Option<&str>) -> AuthResult {
+    // find header and transform into &str
+    let hdr = match hdrs.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) {
+        None => return AuthResult::NoAuth,
+        Some(h) => h,
+    };
+    // split and check that first word is 'Basic'
+    let w = hdr.split_whitespace().collect::<Vec<&str>>();
+    if w.len() < 2 || w[0] != "Basic" {
+        return AuthResult::NoAuth;
+    }
+    // base64 decode 2nd word and transform into String.
+    let s = match base64::decode(w[1]).ok().and_then(|v| String::from_utf8(v).ok()) {
+        None => return AuthResult::BadAuth,
+        Some(v) => v,
+    };
+    // split into name and password.
+    debug!("got basic auth {}", s);
+    let w = s.splitn(2, ':').collect::<Vec<&str>>();
+    if w.len() != 2 {
+        return AuthResult::BadAuth;
+    }
+    // what is set must match
+    match login.map(|l| l == w[0]).unwrap_or(true) &&
+            password.map(|p| p == w[1]).unwrap_or(true) {
+        true => AuthResult::AuthOk,
+        false => AuthResult::BadAuth,
+    }
 }
 

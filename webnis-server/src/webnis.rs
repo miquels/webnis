@@ -37,10 +37,10 @@ impl Webnis {
 
 impl Webnis {
 
-    pub fn serve<'a>(&mut self, mut req: Request<Body>) -> BoxedFuture {
+    pub fn serve<'a>(&mut self, req: Request<Body>) -> BoxedFuture {
 
         // see if we know this route.
-        let mat = match self.inner.matcher.match_req_resp(&mut req) {
+        let mat = match self.inner.matcher.match_req_resp(&req) {
             Err(resp) => return Box::new(future::ok(resp)),
             Ok(m) => m,
         };
@@ -55,6 +55,15 @@ impl Webnis {
             None => return json_error(StatusCode::NOT_FOUND, None, "No such domain"),
             Some(d) => d,
         };
+
+        // check authentication.
+        if let Some(ref p) = domdef.password {
+            match check_basic_auth(req.headers(), None, Some(p.as_str())) {
+                AuthResult::NoAuth => return http_unauthorized(),
+                AuthResult::BadAuth => return http_error(StatusCode::FORBIDDEN, "Bad credentials"),
+                AuthResult::AuthOk => {},
+            }
+        }
 
         // auth or map lookup ?
         match mat.label() {

@@ -153,9 +153,6 @@ impl Matcher {
     /// ```
     pub fn preflight<T>(&self, req: &mut Request<T>) -> Result<(), StatusCode> {
 
-        if req.extensions().get::<MatchState>().is_some() {
-            return Ok(());
-        }
         let mut state = MatchState::default();
 
         // decode path and store it in the request.
@@ -236,11 +233,14 @@ impl Matcher {
     /// StatusCode::BAD_REQUEST         could not find/decode path in request
     /// StatusCode::NOT_FOUND           no match found
     /// StatusCode::METHOD_NOT_ALLOWED  match found, but not for request method.
+    /// StatusCode::PRECONDITION_FAILED you should have called preflight first dummy
     /// ```
-    pub fn match_req<'a, 'b: 'a, T>(&'a self, req: &'b mut Request<T>) -> Result<Match<'a>, StatusCode> {
+    pub fn match_req<'a, 'b: 'a, T>(&'a self, req: &'b Request<T>) -> Result<Match<'a>, StatusCode> {
 
-        self.preflight(req)?;
-        let state = req.extensions().get::<MatchState>().unwrap();
+        let state = match req.extensions().get::<MatchState>() {
+            None => return Err(StatusCode::PRECONDITION_FAILED),
+            Some(s) => s,
+        };
         let n = state.route_index;
 
         // pattern "n" matches. Run regexp "n" and return result.
@@ -301,12 +301,8 @@ impl Matcher {
     ///     }
     /// };
     /// ```      
-    pub fn match_req_resp<'a, 'b: 'a, T>(&'a self, req: &'b mut Request<T>) -> Result<Match<'a>, Response<T>>
+    pub fn match_req_resp<'a, 'b: 'a, T>(&'a self, req: &'b Request<T>) -> Result<Match<'a>, Response<T>>
         where T: std::convert::From<String> {
-
-        if let Err(resp) = self.preflight_resp(req) {
-            return Err(resp);
-        }
 
         let status = match self.match_req(req) {
             Ok(r) => return Ok(r),
