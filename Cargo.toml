@@ -2,5 +2,5 @@
 members = ["webnis-nss", "webnis-pam", "webnis-bind", "webnis-server" ]
 
 [patch.crates-io]
-tokio-tls = { git = "https://github.com/phlmn/tokio-tls", branch = "new-tokio" }
+tokio-tls = { git = "https://github.com/tokio-rs/tokio-tls" }
 

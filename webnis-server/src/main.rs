@@ -15,16 +15,21 @@ extern crate routematcher;
 extern crate hyper_tls_hack;
 extern crate openssl;
 extern crate native_tls;
+extern crate tokio;
+extern crate tokio_tls;
 extern crate base64;
+extern crate net2;
 
 pub(crate) mod config;
 pub(crate) mod db;
 pub(crate) mod format;
 pub(crate) mod webnis;
 pub(crate) mod util;
+pub(crate) mod plaintext;
 
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr,ToSocketAddrs};
 use std::process::exit;
+use std::sync::Arc;
 
 use futures::future::{self, Either};
 use futures::Stream;
@@ -86,9 +91,10 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let matcher = builder.compile();
     let webnis = Webnis::new(matcher, config.clone());
 
+    // build a TLS acceptor if we're going to do TLS.
     let tls_acceptor = if config.server.tls {
         let tls_acceptor = if config.server.p12_file.is_some() {
-            hyper_tls_hack::acceptor_from_file(config.server.p12_file.unwrap(),
+            hyper_tls_hack::acceptor_from_p12_file(config.server.p12_file.unwrap(),
                                                &config.server.cert_password)
         } else {
             acceptor_from_pem_files(config.server.key_file.unwrap(),
@@ -100,20 +106,32 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 eprintln!("{}: {}", PROGNAME, e);
                 exit(1);
             },
-            Ok(a) => Some(a),
+            Ok(a) => Some(Arc::new(a)),
         }
     } else {
         None
     };
+    let acceptor_ref = tls_acceptor.as_ref();
 
     // start the servers.
+    //
+    // The way this is set up makes it possible to start both non-tls and tls
+    // listening servers at the same time, even though we do not actually
+    // use that at the moment because 'tls' is a global webnis setting.
     let mut servers = Vec::new();
     for sockaddr in config.server.listen.to_socket_addrs().unwrap() {
+        let listener = match make_listener(&sockaddr) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
+                exit(1);
+            },
+        };
         let proto = if config.server.tls { "https" } else { "http" };
         println!("Listening on {}://{:?}", proto, sockaddr);
         let server = if config.server.tls {
-            let acceptor = tls_acceptor.as_ref().unwrap().clone();
-            let mut ai = match hyper_tls_hack::AddrIncoming::new(&sockaddr, acceptor, None) {
+            let acceptor = acceptor_ref.map(|a| a.clone()).unwrap();
+            let mut ai = match hyper_tls_hack::AddrIncoming::from_std_listener(listener, acceptor, None) {
                 Err(e) => {
                     eprintln!("{}: tlslistener on {:?}: {}", PROGNAME, &sockaddr, e);
                     exit(1);
@@ -127,17 +145,18 @@ fn main() -> Result<(), Box<std::error::Error>> {
                     .map_err(|e| eprintln!("https server error: {}", e))
             )
         } else {
+            let mut ai = match plaintext::AddrIncoming::from_std_listener(listener, None) {
+                Err(e) => {
+                    eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
+                    exit(1);
+                },
+                Ok(ai) => ai,
+            };
+            ai.set_nodelay(true);
             Either::B(
-                match Server::try_bind(&sockaddr) {
-                    Err(e) => {
-                        eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
-                        exit(1);
-                    },
-                    Ok(s) => s,
-                }
-                .tcp_nodelay(true)
-                .serve(webnis.clone())
-                .map_err(|e| eprintln!("http server error: {}", e))
+                Server::builder(ai)
+                    .serve(webnis.clone())
+                    .map_err(|e| eprintln!("http server error: {}", e))
             )
         };
         servers.push(server);
@@ -148,6 +167,20 @@ fn main() -> Result<(), Box<std::error::Error>> {
     rt::run(fut);
 
     Ok(())
+}
+
+// Make a new TcpListener, and if it's a V6 listener, set the
+// V6_V6ONLY socket option on it.
+fn make_listener(addr: &SocketAddr) -> std::io::Result<std::net::TcpListener> {
+    let s = if addr.is_ipv6() {
+        let s = net2::TcpBuilder::new_v6()?;
+        s.only_v6(true)?;
+        s
+    } else {
+        net2::TcpBuilder::new_v4()?
+    };
+    s.bind(addr)?;
+    s.listen(128)
 }
 
 // new_service() gets called by hyper every time a new HTTP connection

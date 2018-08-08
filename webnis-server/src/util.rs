@@ -14,7 +14,8 @@ use openssl::pkey::PKey;
 use openssl::x509::X509;
 use openssl::pkcs12::Pkcs12;
 use openssl::stack::Stack;
-use native_tls::{Identity,TlsAcceptor};
+use native_tls::{self,Identity};
+use tokio_tls;
 
 use base64;
 
@@ -96,10 +97,11 @@ fn read_pems(key: impl AsRef<Path>, cert: impl AsRef<Path>, password: &str) -> i
     Ok(pkcs12.to_der()?)
 }
 
-pub fn acceptor_from_pem_files(key: impl AsRef<Path>, cert: impl AsRef<Path>, password: &str) -> io::Result<TlsAcceptor> {
-    let identity = read_pems(key, cert, password)?;
-    let identity = Identity::from_pkcs12(&identity, "").map_err(|e| Error::new(ErrorKind::Other, e))?;
-    TlsAcceptor::new(identity).map_err(|e| Error::new(ErrorKind::Other, e))
+pub fn acceptor_from_pem_files(key: impl AsRef<Path>, cert: impl AsRef<Path>, password: &str) -> io::Result<tokio_tls::TlsAcceptor> {
+    let der = read_pems(key, cert, password)?;
+    let cert = Identity::from_pkcs12(&der, "").map_err(|e| Error::new(ErrorKind::Other, e))?;
+    let tls_cx = native_tls::TlsAcceptor::builder(cert).build().map_err(|e| Error::new(ErrorKind::Other, e))?;
+    Ok(tokio_tls::TlsAcceptor::from(tls_cx))
 }
 
 #[derive(Debug,PartialEq)]
