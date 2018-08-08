@@ -7,7 +7,7 @@ password   = "donkey jaw"
 
 # Server to use. Users servers = [ ... ] for multiple servers.
 #server     = "localhost:3333"
-servers     = [ "mikevs-dev.xs4all.net:3246", "mikevs-dev.xs4all.net:3245" ]
+servers     = [ "mikevs-dev.xs4all.net:3245", "mikevs-dev.xs4all.net:3245" ]
 #servers     = [ "www.xs4all.nl:3333", "smtp.xs4all.nl:8245" ]
 #servers    = [ "auth1.xs4all.nl", "auth2.xs4all.nl" ]
 
@@ -18,4 +18,10 @@ concurrency = 500
 # server, regardless of the concurrency. If this is set, "concurrency"
 # is set to 100 minimal.
 http2_only = true
+
+# Restrict uid lookup for non-root-users to their own uid.
+restrict_getpwuid = true
+
+# Restrict gid lookup for non-root-users to gids < 1000 and their own gid.
+restrict_getgrgid = true
 

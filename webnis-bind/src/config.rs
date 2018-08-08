@@ -15,6 +15,10 @@ pub struct Config {
     pub servers:        Vec<String>,
     pub http2_only:     Option<bool>,
     pub concurrency:    Option<usize>,
+    #[serde(default)]
+    pub restrict_getpwuid:  bool,
+    #[serde(default)]
+    pub restrict_getgrgid:  bool,
 }
 
 pub fn read(name: &str) -> io::Result<Config> {

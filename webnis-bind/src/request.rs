@@ -28,6 +28,7 @@ const REQUEST_TIMEOUT_MS: u64 = 1000;
 pub(crate) struct Request<'a> {
     cmd:    Cmd,
     args:   Vec<&'a str>,
+    arg0:   u32,
 }
 
 pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Error=io::Error> + Send> {
@@ -35,6 +36,20 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
         Ok(req) => req,
         Err(e) => return Box::new(future::ok(Response::error(400, &e))),
     };
+
+    // getpwuid() might be restricted to only looking up your own uid.
+    if ctx.config.restrict_getpwuid && request.cmd == Cmd::GetPwUid {
+        if ctx.uid > 0 && request.arg0 != ctx.uid {
+            return Box::new(future::ok(Response::error(403, "Forbidden")));
+        }
+    }
+
+    // getgrgid() might be restricted to only looking up gids < 1000 and your own gid.
+    if ctx.config.restrict_getgrgid && request.cmd == Cmd::GetGrGid {
+        if ctx.uid > 0 && request.arg0 >= 1000 && request.arg0 != ctx.gid {
+            return Box::new(future::ok(Response::error(403, "Forbidden")));
+        }
+    }
 
     let user_pass = format!(":{}", ctx.config.password);
     let authorization = format!("Basic {}", base64::encode(&user_pass));
@@ -277,7 +292,15 @@ impl<'a> Request<'a> {
         if nargs != args.len() {
             return Err(format!("{} needs {} arguments", c, nargs));
         }
-        Ok(Request{ cmd: cmd, args: args })
+        let arg0 = if cmd == Cmd::GetPwUid || cmd == Cmd::GetGrGid {
+            match args[0].parse::<u32>() {
+                Err(_) => return Err("Not a number".to_owned()),
+                Ok(n) => n,
+            }
+        } else {
+            0
+        };
+        Ok(Request{ cmd: cmd, args: args, arg0: arg0 })
     }
 }
 

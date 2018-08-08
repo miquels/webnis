@@ -54,8 +54,9 @@ pub struct Context {
     http_client:    Arc<Mutex<HttpClient>>,
     // has client gone away?
     eof:            Arc<AtomicBool>,
-    // uid of process talking to us on unix socket
-    uid:            u64,
+    // uid/gid of process talking to us on unix socket
+    uid:            u32,
+    gid:            u32,
 }
 
 const PROGNAME : &'static str = "webnis-bind";
@@ -90,7 +91,8 @@ fn main() {
         config:         Arc::new(config),
 		http_client:    Arc::new(Mutex::new(HttpClient{ client: None, seqno: seqno })),
         eof:            Arc::new(AtomicBool::new(false)),
-        uid:            0xffffffffffffffff,
+        uid:            0xfffffffe,
+        gid:            0xfffffffe,
     };
 
     // Get a UNIX stream listener.
@@ -116,15 +118,16 @@ fn main() {
         .map(move |socket| {
 
             // set up context for this session.
-            let uid = match socket.peer_cred() {
-                Ok(creds) => creds.uid as u64,
-                Err(_) => 0xffffffffffffffff,
+            let (uid, gid) = match socket.peer_cred() {
+                Ok(creds) => (creds.uid as u32, creds.gid as u32),
+                Err(_) => (0xfffffffe, 0xfffffffe),
             };
             let ctx = Context{
                 config:         ctx.config.clone(),
                 http_client:    ctx.http_client.clone(),
                 eof:            Arc::new(AtomicBool::new(false)),
                 uid:            uid,
+                gid:            gid,
             };
 
             // set up codec for reader and writer.
