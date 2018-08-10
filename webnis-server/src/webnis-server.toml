@@ -9,7 +9,7 @@
   name = "xs4all.nl"
   password = "donkey jaw"
   db_dir = "/var/yp/xs4all.nl"
-  maps = [ "passwd", "group", "gidlist" ]
+  maps = [ "passwd", "group", "gidlist", "ip.wdsl" ]
   default = true
   auth = "adjunct"
 
@@ -55,4 +55,10 @@
   key = "name"
   map_type = "json"
   map_file = "gidlist"
+
+[map."ip.wdsl"]
+  key = "circuit"
+  map_format = "kv"
+  map_type   = "gdbm"
+  map_file = "ip.wdsl.bycircuit"
 

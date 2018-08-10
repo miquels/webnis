@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 
 use serde_json;
 
@@ -77,12 +78,41 @@ impl<'a> Group<'a> {
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum NumOrText<'a> {
+    Number(i64),
+    Text(&'a str),
+}
+
+#[derive(Debug, Serialize)]
+pub struct KeyValue<'a>(HashMap<&'a str, NumOrText<'a>>);
+
+impl<'a> KeyValue<'a> {
+    pub fn from_line(line: &str) -> Result<KeyValue, FormatError> {
+        let mut hm = HashMap::new();
+        for kv in line.split_whitespace() {
+            let mut w = kv.splitn(2, '=');
+            let k = w.next().unwrap();
+            let v = w.next().unwrap_or("");
+            if let Ok(n) = v.parse::<i64>() {
+                hm.insert(k, NumOrText::Number(n));
+            } else {
+                hm.insert(k, NumOrText::Text(v));
+            }
+        }
+        Ok(KeyValue(hm))
+    }
+}
+
 pub fn line_to_json(line: &str, format: &str) -> Result<serde_json::Value, FormatError> {
     match format {
-        "passwd" => serde_json::to_value(&Passwd::from_line(line)?).map_err(|_| FormatError),
-        "group"  => serde_json::to_value(&Group::from_line(line)?).map_err(|_| FormatError),
-        "adjunct"  => serde_json::to_value(&Adjunct::from_line(line)?).map_err(|_| FormatError),
-        _ => Err(FormatError),
+        "passwd"    => serde_json::to_value(&Passwd::from_line(line)?).map_err(|_| FormatError),
+        "group"     => serde_json::to_value(&Group::from_line(line)?).map_err(|_| FormatError),
+        "adjunct"   => serde_json::to_value(&Adjunct::from_line(line)?).map_err(|_| FormatError),
+        "kv"        => serde_json::to_value(&KeyValue::from_line(line)?).map_err(|_| FormatError),
+        "json"      => serde_json::from_str(line).map_err(|_| FormatError),
+        _           => Err(FormatError),
     }
 }
 
