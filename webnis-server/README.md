@@ -21,16 +21,13 @@ As you can see the reply format is loosely based on JSONRPC.
 Currently implemented are:
 
 ```
-GET BASE/passwd?name=<name>
-GET BASE/passwd?uid=<number>
-GET BASE/group?name=<name>
-GET BASE/group?gid=<number>
-GET BASE/gidlist?name=<name>
+GET <BASE>/<DOMAIN>/map/passwd?name=<name>
+GET <BASE>/<DOMAIN>/map/passwd?uid=<number>
+GET <BASE>/<DOMAIN>/map/group?name=<name>
+GET <BASE>/<DOMAIN>/map/group?gid=<number>
+GET <BASE>/<DOMAIN>/map/gidlist?name=<name>
+POST <BASE>/<DOMAIN>/auth
 ```
 
-To be implemented:
-```
-POST BASE/auth
-     body params: name,passwd
-```
-
+For auth you need to send a `x-www-form-urlencoded` body with
+`username` and `password` parameters.

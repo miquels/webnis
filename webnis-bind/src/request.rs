@@ -60,7 +60,7 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
         // the client (webnis-pam), we do not have to encode again.
         let path = format!("/{}/auth",
                         utf8_percent_encode(&ctx.config.domain, DEFAULT_ENCODE_SET));
-        let body = format!("login={}&password={}",
+        let body = format!("username={}&password={}",
                         utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET),
                         request.args[1]);
         return req_with_retries(&ctx, path, authorization, Some(body), 1)

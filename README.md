@@ -10,22 +10,22 @@ it _is_ all written in Rust!.
 
 Webnis contains:
 
-## webnis-server
+## [webnis-server](webnis-server/)
 
 A simple HTTPS server that serves gdbm / json maps indexed by a key.
 It can in fact serve existing NIS maps from /var/yp/<domain>. It can
 also do authentication by looking up username/password in one of those
 maps and verifying the password using pwhash::unix::verify().
 
-## webnis-nss
+## [webnis-nss](webnis-nss/)
 
 A NSS module (libnss_webnis.so.2) that does passwd/group lookups via webnis (using webnis-bind).
 
-## webnis-pam
+## [webnis-pam](webnis-pam/)
 
 A PAM module (pam_webnis.so) that authenticates via webnis (using webnis-bind).
 
-## webnis-bind
+## [webnis-bind](webnis-bind/)
 
 A daemon that sits between the webnis-server and webnis-pam/webnis-nss.
 It checks which servers are alive, does reconnects, keeps a connection

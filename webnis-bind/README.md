@@ -60,14 +60,10 @@ GETPWUID <uid>		GET <BASE>/<DOMAIN>/map/passwd?uid=<number>
 GETGRNAM <name>		GET <BASE>/<DOMAIN>/map/group?name=<name>
 GETGRGID <gid>		GET <BASE>/<DOMAIN>/map/group?gid=<number>
 GETGIDLIST <name>	GET <BASE>/<DOMAIN>/map/gidlist?name=<name>
-AUTH <name> <passwd>	GET <BASE>/<DOMAIN>/auth?login=<LOGIN>&password=<PASSWORD>
+AUTH <name> <passwd>	POST <BASE>/<DOMAIN>/auth
 ```
 
 `<BASE>` defaults to `/.well-known/webnis`, and `<DOMAIN>` defaults to .... `default`.
 
-To be implemented (soon!):
-```
-AUTH <name> <passwd>	POST <BASE>/<DOMAIN>/auth
-			body params: name,passwd
-```
+The `<passwd>` in AUTH needs to be percent-encoded by the client.
 

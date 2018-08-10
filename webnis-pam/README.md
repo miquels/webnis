@@ -17,4 +17,5 @@ The line based protocol between the module and webnis-bind is like:
 >> AUTH mikevs password
 << 200 OK
 ```
+Note that the `password` needs to be percent-encoded.
 
