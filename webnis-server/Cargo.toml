@@ -5,7 +5,7 @@ authors = ["mikevs <mikevs@xs4all.net>"]
 
 [dependencies]
 actix = "0.7.3"
-actix-web = "0.7.3"
+actix-web = { version = "0.7.3", features = [ "alpn" ] }
 base64 = "0.9.2"
 clap = "2.29.4"
 env_logger = "0.5"
@@ -14,9 +14,11 @@ gdbm = "0.1.1"
 http = "0.1.9"
 libc = "0.2.42"
 log = "0.4.3"
+openssl = "0.10"
 percent-encoding = "1.0.1"
 pwhash = "0.2"
 serde = "1.0.71"
 serde_derive = "1.0.71"
 serde_json = "1"
 toml = "0.4.6"
+

@@ -27,7 +27,6 @@ pub struct Config {
 pub struct Server {
     #[serde(default)]
     pub tls:            bool,
-    pub p12_file:       Option<String>,
     pub crt_file:       Option<String>,
     pub key_file:       Option<String>,
     #[serde(default)]
@@ -121,23 +120,14 @@ pub fn read(name: &str) -> io::Result<Config> {
     }
 
     if config.server.tls {
-        if config.server.p12_file.is_none() && config.server.key_file.is_none() && config.server.crt_file.is_none() {
+        if config.server.key_file.is_none() && config.server.crt_file.is_none() {
                 return Err(io::Error::new(io::ErrorKind::InvalidData,
                                            "config: tls enabled but no cert files configured"));
         }
 
-        if config.server.p12_file.is_some() {
-            if config.server.key_file.is_some() || config.server.crt_file.is_some() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                           "config: set either p12 or pem (key/crt) certs, not both"));
-            }
-        }
-
-        if config.server.key_file.is_some() || config.server.crt_file.is_some() {
-            if config.server.key_file.is_some() != config.server.crt_file.is_some() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                           "config: both the key_file and crt_file must be set"));
-            }
+        if config.server.key_file.is_some() != config.server.crt_file.is_some() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                       "config: both the key_file and crt_file must be set"));
         }
     }
 

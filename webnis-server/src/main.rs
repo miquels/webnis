@@ -10,6 +10,7 @@ extern crate futures;
 extern crate gdbm;
 extern crate http;
 extern crate libc;
+extern crate openssl;
 extern crate percent_encoding;
 extern crate pwhash;
 extern crate serde;
@@ -18,6 +19,7 @@ extern crate toml;
 pub(crate) mod config;
 pub(crate) mod db;
 pub(crate) mod format;
+pub(crate) mod ssl;
 pub(crate) mod util;
 pub(crate) mod webnis;
 
@@ -95,14 +97,12 @@ fn main() {
 
     let mut server = server::new(app_factory);
 	for sockaddr in config.server.listen.to_socket_addrs().unwrap() {
-        /*
         let result = if config.server.tls {
-            server.bind_ssl(sockaddr)
+            server.bind_ssl(sockaddr, ssl::acceptor_or_exit(&config))
         } else {
             server.bind(sockaddr)
         };
-        */
-        let result = server.bind(sockaddr);
+        //let result = server.bind(sockaddr);
         server = match result {
             Ok(s) => s,
             Err(e) => {

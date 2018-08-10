@@ -1,7 +1,8 @@
 [server]
-  listen = [ "0.0.0.0:3245", "[::]:3245" ]
+  listen = [ "0.0.0.0:3245", "[::]:3246" ]
   tls = true
-  p12_file = "/etc/ssl/private/wildcard.xs4all.nl.pfx"
+  key_file = "/etc/ssl/private/wildcard.xs4all.net.key"
+  crt_file = "/etc/ssl/certs/wildcard.xs4all.net.crt"
   cert_password = ""
 
 [[domain]]
