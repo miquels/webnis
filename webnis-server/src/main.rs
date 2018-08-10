@@ -10,6 +10,7 @@ extern crate futures;
 extern crate gdbm;
 extern crate http;
 extern crate libc;
+extern crate net2;
 extern crate openssl;
 extern crate percent_encoding;
 extern crate pwhash;
@@ -23,7 +24,7 @@ pub(crate) mod ssl;
 pub(crate) mod util;
 pub(crate) mod webnis;
 
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr,ToSocketAddrs};
 use std::process::exit;
 
 use actix_web::{
@@ -105,12 +106,18 @@ fn main() {
     });
 
 	for sockaddr in config.server.listen.to_socket_addrs().unwrap() {
-        let result = if config.server.tls {
-            server.bind_ssl(sockaddr, ssl::acceptor_or_exit(&config))
-        } else {
-            server.bind(sockaddr)
+        let listener = match make_listener(&sockaddr) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("{}: listener on {}: {}", PROGNAME, &sockaddr, e);
+                exit(1);
+            },
         };
-        //let result = server.bind(sockaddr);
+        let result = if config.server.tls {
+            server.listen_ssl(listener, ssl::acceptor_or_exit(&config))
+        } else {
+            Ok(server.listen(listener))
+        };
         server = match result {
             Ok(s) => s,
             Err(e) => {
@@ -166,6 +173,20 @@ fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item=HttpResponse, Error
             future::ok(webnis.handle_auth(domain, data.to_vec()).into())
         })
         .responder()
+}
+
+// Make a new TcpListener, and if it's a V6 listener, set the
+// V6_V6ONLY socket option on it.
+fn make_listener(addr: &SocketAddr) -> std::io::Result<std::net::TcpListener> {
+    let s = if addr.is_ipv6() {
+        let s = net2::TcpBuilder::new_v6()?;
+        s.only_v6(true)?;
+        s
+    } else {
+        net2::TcpBuilder::new_v4()?
+    };
+    s.bind(addr)?;
+    s.listen(128)
 }
 
 fn raise_rlimit_nofile(want_lim: libc::rlim_t) {
