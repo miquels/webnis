@@ -73,10 +73,10 @@ fn main() {
 
     let ct = "content-type";
     let x_www_form = "application/x-www-form-urlencoded";
-    let app_factory = move || {
-            let webnis = webnis.clone();
+    let app_factory = move |prefix, webnis| {
             App::with_state(webnis)
-                .resource("/webnis/{domain}/auth", move |r| {
+                .prefix(prefix)
+                .resource("/{domain}/auth", move |r| {
                     r.method(http::Method::POST)
                         .filter(pred::Header(ct, x_www_form))
                         .f(handle_auth);
@@ -87,7 +87,7 @@ fn main() {
                         .filter(pred::Not(pred::Post()))
                         .f(|_| HttpResponse::MethodNotAllowed());
                 })
-                .resource("/webnis/{domain}/map/{map}", |r| {
+                .resource("/{domain}/map/{map}", |r| {
                     r.method(http::Method::GET).f(handle_map);
                     r.route()
                         .filter(pred::Not(pred::Get()))
@@ -95,7 +95,15 @@ fn main() {
                 })
     };
 
-    let mut server = server::new(app_factory);
+    let mut server = server::new(move || {
+        let webnis = webnis.clone();
+        vec![
+            app_factory("/webnis", webnis.clone()),
+            app_factory("/.well-known/webnis", webnis.clone()),
+            App::with_state(webnis).resource("/", |r| r.f(|_| HttpResponse::NotFound())),
+        ]
+    });
+
 	for sockaddr in config.server.listen.to_socket_addrs().unwrap() {
         let result = if config.server.tls {
             server.bind_ssl(sockaddr, ssl::acceptor_or_exit(&config))
