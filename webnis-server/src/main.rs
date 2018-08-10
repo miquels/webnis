@@ -1,51 +1,46 @@
+#[macro_use] extern crate clap;
+#[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate serde_json;
-#[macro_use] extern crate log;
-#[macro_use] extern crate clap;
-extern crate serde;
-extern crate hyper;
+extern crate actix;
+extern crate actix_web;
+extern crate base64;
 extern crate env_logger;
-extern crate toml;
 extern crate futures;
 extern crate gdbm;
 extern crate http;
 extern crate libc;
+extern crate percent_encoding;
 extern crate pwhash;
-extern crate routematcher;
-extern crate hyper_tls_hack;
-extern crate openssl;
-extern crate native_tls;
-extern crate tokio;
-extern crate tokio_tls;
-extern crate base64;
-extern crate net2;
+extern crate serde;
+extern crate toml;
 
 pub(crate) mod config;
 pub(crate) mod db;
 pub(crate) mod format;
-pub(crate) mod webnis;
 pub(crate) mod util;
-pub(crate) mod plaintext;
+pub(crate) mod webnis;
 
-use std::net::{SocketAddr,ToSocketAddrs};
+use std::net::ToSocketAddrs;
 use std::process::exit;
-use std::sync::Arc;
 
-use futures::future::{self, Either};
-use futures::Stream;
-use hyper::rt::{self, Future};
-use hyper::{Body, Request, Response, Server, StatusCode, header};
-use hyper::service::{Service,NewService};
-use http::Method;
+use actix_web::{
+    server, pred,
+    App, AsyncResponder,
+    HttpRequest, HttpResponse, HttpMessage,
+    FromRequest, Path,
+    http::StatusCode,
+};
+use futures::{future,Future};
 
-use routematcher::Builder;
 use util::*;
 
 use webnis::Webnis;
 
 static PROGNAME: &'static str = "webnis-server";
 
-fn main() -> Result<(), Box<std::error::Error>> {
+
+fn main() {
 
     env_logger::init();
 
@@ -70,58 +65,46 @@ fn main() -> Result<(), Box<std::error::Error>> {
     // arbitrary limit, really.
     raise_rlimit_nofile(64000);
 
-    // build the routes we're going to serve.
-    let builder = Builder::new();
-    builder
-        .add("/webnis/:domain/map/:map")
-        .method(&Method::GET)
-        .label("map");
-    builder
-        .add("/.well-known/webnis/:domain/map/:map")
-        .method(&Method::GET)
-        .label("map");
-    builder
-        .add("/webnis/:domain/auth")
-        .method(&Method::POST)
-        .label("auth");
-    builder
-        .add("/.well-known/webnis/:domain/auth")
-        .method(&Method::POST)
-        .label("auth");
-    let matcher = builder.compile();
-    let webnis = Webnis::new(matcher, config.clone());
+    let webnis = Webnis::new(config.clone());
 
-    // build a TLS acceptor if we're going to do TLS.
-    let tls_acceptor = if config.server.tls {
-        let tls_acceptor = if config.server.p12_file.is_some() {
-            hyper_tls_hack::acceptor_from_p12_file(config.server.p12_file.unwrap(),
-                                               &config.server.cert_password)
-        } else {
-            acceptor_from_pem_files(config.server.key_file.unwrap(),
-                                    config.server.crt_file.unwrap(),
-                                    &config.server.cert_password)
-        };
-        match tls_acceptor {
-            Err(e) => {
-                eprintln!("{}: {}", PROGNAME, e);
-                exit(1);
-            },
-            Ok(a) => Some(Arc::new(a)),
-        }
-    } else {
-        None
+    let sys = actix::System::new("webnis");
+
+    let ct = "content-type";
+    let x_www_form = "application/x-www-form-urlencoded";
+    let app_factory = move || {
+            let webnis = webnis.clone();
+            App::with_state(webnis)
+                .resource("/webnis/{domain}/auth", move |r| {
+                    r.method(http::Method::POST)
+                        .filter(pred::Header(ct, x_www_form))
+                        .f(handle_auth);
+                    r.method(http::Method::POST)
+                        .filter(pred::Not(pred::Header(ct, x_www_form)))
+                        .f(|_| HttpResponse::UnsupportedMediaType());
+                    r.route()
+                        .filter(pred::Not(pred::Post()))
+                        .f(|_| HttpResponse::MethodNotAllowed());
+                })
+                .resource("/webnis/{domain}/map/{map}", |r| {
+                    r.method(http::Method::GET).f(handle_map);
+                    r.route()
+                        .filter(pred::Not(pred::Get()))
+                        .f(|_| HttpResponse::MethodNotAllowed());
+                })
     };
-    let acceptor_ref = tls_acceptor.as_ref();
 
-    // start the servers.
-    //
-    // The way this is set up makes it possible to start both non-tls and tls
-    // listening servers at the same time, even though we do not actually
-    // use that at the moment because 'tls' is a global webnis setting.
-    let mut servers = Vec::new();
-    for sockaddr in config.server.listen.to_socket_addrs().unwrap() {
-        let listener = match make_listener(&sockaddr) {
-            Ok(l) => l,
+    let mut server = server::new(app_factory);
+	for sockaddr in config.server.listen.to_socket_addrs().unwrap() {
+        /*
+        let result = if config.server.tls {
+            server.bind_ssl(sockaddr)
+        } else {
+            server.bind(sockaddr)
+        };
+        */
+        let result = server.bind(sockaddr);
+        server = match result {
+            Ok(s) => s,
             Err(e) => {
                 eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
                 exit(1);
@@ -129,130 +112,52 @@ fn main() -> Result<(), Box<std::error::Error>> {
         };
         let proto = if config.server.tls { "https" } else { "http" };
         println!("Listening on {}://{:?}", proto, sockaddr);
-        let server = if config.server.tls {
-            let acceptor = acceptor_ref.map(|a| a.clone()).unwrap();
-            let mut ai = match hyper_tls_hack::AddrIncoming::from_std_listener(listener, acceptor, None) {
-                Err(e) => {
-                    eprintln!("{}: tlslistener on {:?}: {}", PROGNAME, &sockaddr, e);
-                    exit(1);
-                },
-                Ok(ai) => ai,
-            };
-            ai.set_nodelay(true);
-            Either::A(
-                Server::builder(ai)
-                    .serve(webnis.clone())
-                    .map_err(|e| eprintln!("https server error: {}", e))
-            )
-        } else {
-            let mut ai = match plaintext::AddrIncoming::from_std_listener(listener, None) {
-                Err(e) => {
-                    eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
-                    exit(1);
-                },
-                Ok(ai) => ai,
-            };
-            ai.set_nodelay(true);
-            Either::B(
-                Server::builder(ai)
-                    .serve(webnis.clone())
-                    .map_err(|e| eprintln!("http server error: {}", e))
-            )
-        };
-        servers.push(server);
     }
+    server.start();
 
-    // wait for all servers to finish.
-    let fut = future::join_all(servers).then(|_| Ok(()));
-    rt::run(fut);
-
-    Ok(())
+    let _ = sys.run();
 }
 
-// Make a new TcpListener, and if it's a V6 listener, set the
-// V6_V6ONLY socket option on it.
-fn make_listener(addr: &SocketAddr) -> std::io::Result<std::net::TcpListener> {
-    let s = if addr.is_ipv6() {
-        let s = net2::TcpBuilder::new_v6()?;
-        s.only_v6(true)?;
-        s
-    } else {
-        net2::TcpBuilder::new_v4()?
+fn check_authorization(req: &HttpRequest<Webnis>, domain: &str) -> Option<HttpResponse> {
+    let passwd = match req.state().domain_password(domain) {
+        None => return None,
+        Some(p) => p,
     };
-    s.bind(addr)?;
-    s.listen(128)
-}
-
-// new_service() gets called by hyper every time a new HTTP connection
-// is made. It returns a "Service" which is called for every HTTP
-// request on this connection.
-//
-// Often this trait is implemented on a seperate struct from the
-// main service, but there is no reason why a struct cannot implement
-// both the NewService and Service traits.
-impl NewService for Webnis {
-    type ReqBody = Body;
-    type ResBody = Body;
-    type Error = BoxedError;
-	type Service = Self;
-	type Future = future::FutureResult<Self::Service, Self::InitError>;
-    type InitError = BoxedError;
-
-    fn new_service(&self) -> <Self as NewService>::Future {
-        future::ok(self.clone())
+    match check_basic_auth(req.headers(), None, Some(passwd)) {
+        AuthResult::NoAuth => Some(http_unauthorized()),
+        AuthResult::BadAuth => Some(http_error(StatusCode::FORBIDDEN, "Bad credentials")),
+        AuthResult::AuthOk => None,
     }
 }
 
-// This is the actual HTTP request handler.
-impl Service for Webnis {
-    type ReqBody = Body;
-    type ResBody = Body;
-    type Error = BoxedError;
-    type Future = BoxedFuture;
-
-    fn call(&mut self, mut req: Request<<Self as Service>::ReqBody>) -> BoxedFuture {
-        debug!("{}", req.uri());
-
-        // Route matcher preflight.
-        if let Err(resp) = self.inner.matcher.preflight_resp(&mut req) {
-            return Box::new(future::ok(resp));
-        }
-
-        match req.method() {
-            &Method::GET => {
-                self.serve(req)
-            },
-            &Method::POST => {
-                // first some claning and moving around of values to keep
-                // the borrow checker happy.
-                let (parts, body) = req.into_parts();
-                let mut req = Request::from_parts(parts, Body::empty());
-                let mut self2 = self.clone();
-                // Then read the body, decode it, and call self.serve()
-                let future = body
-                    .concat2()
-                    .map_err(box_error)
-                    .then(move |res| {
-                        match res.and_then(|b| {
-                                self2.inner.matcher.parse_body(&mut req, &b).map_err(box_error)
-                            }) {
-                            Ok(()) => self2.serve(req),
-                            Err(_) => {
-                                Box::new(future::ok(Response::builder()
-                                    .header(header::CONTENT_TYPE, "text/plain")
-                                    .header(header::CONNECTION, "close")
-                                    .status(StatusCode::BAD_REQUEST)
-                                    .body("Failed to read/parse body\n".into()).unwrap()))
-                            }
-                        }
-                    });
-                Box::new(future)
-            },
-            _ => {
-                http_error(StatusCode::INTERNAL_SERVER_ERROR, "This did not happen (or did it?)")
-            },
-        }
+fn handle_map(req: &HttpRequest<Webnis>) -> HttpResponse {
+    let params = match Path::<(String, String)>::extract(req) {
+        Err(_) => return HttpResponse::InternalServerError().body("handle_map should not fail\n"),
+        Ok(d) => d,
+    };
+    if let Some(denied) = check_authorization(req, &params.0) {
+        return denied;
     }
+    req.state().handle_map(&params.0, &params.1, &req.query())
+}
+
+fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item=HttpResponse, Error=actix_web::Error>> {
+    let domain = match Path::<String>::extract(req) {
+        Err(_) => return Box::new(future::ok(HttpResponse::InternalServerError().body("handle_auth should not fail\n"))),
+        Ok(d) => d,
+    };
+    if let Some(denied) = check_authorization(req, &domain) {
+        return Box::new(future::ok(denied));
+    }
+    let webnis = req.state().clone();
+    let domain = domain.clone();
+    req.body()
+        .limit(1024)
+        .from_err()
+        .and_then(move |data| {
+            future::ok(webnis.handle_auth(domain, data.to_vec()).into())
+        })
+        .responder()
 }
 
 fn raise_rlimit_nofile(want_lim: libc::rlim_t) {

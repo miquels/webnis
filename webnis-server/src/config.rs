@@ -144,3 +144,31 @@ pub fn read(name: &str) -> io::Result<Config> {
     Ok(config)
 }
 
+impl Config {
+
+    /// look up a domain by name.
+    pub fn find_domain(&self, name: &str) -> Option<&Domain> {
+        self.domain.iter().find(|d| d.name == name)
+    }
+
+    /// Find a map by name. As map definitions with the same name can occur
+    /// multiple times in the config with different keys, the key has
+    /// to be a valid lookup key for the map as well.
+    pub fn find_map<'a>(&self, mapname: &str, key: &str) -> Option<(&Map, &str)> {
+        let maps = self.map_.get(mapname)?;
+        for m in maps {
+            let key = m.key_alias.get(key).map(|s| s.as_str()).unwrap_or(key);
+            let mut keys= m.key.iter().chain(m.keys.iter());
+            if let Some(k) = keys.find(|ref k| k.as_str() == key) {
+                return Some((m, k));
+            }
+        }
+        None
+    }
+
+    /// Like find_map, but map must be in the allowed list for the domain
+    pub fn find_allowed_map(&self, domain: &Domain, mapname: &str, key: &str) -> Option<(&Map, &str)> {
+        domain.maps.iter().find(|m| m.as_str() == mapname)
+            .and_then(|_| self.find_map(mapname, key))
+    }
+}

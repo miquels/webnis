@@ -1,50 +1,42 @@
 use std;
-use std::io;
-use std::io::{Error,ErrorKind};
-use std::path::Path;
+use std::collections::HashMap;
 
-use hyper::{header,Body,Response,StatusCode};
-use http::header::{HeaderMap,HeaderValue};
+use actix_web::HttpResponse;
+use actix_web::http::{StatusCode};
+use actix_web::http::header::{self,HeaderMap,HeaderValue};
 
-use futures::{future,Future};
+use percent_encoding::percent_decode;
 
 use serde_json;
 
-use openssl::pkey::PKey;
-use openssl::x509::X509;
-use openssl::pkcs12::Pkcs12;
-use openssl::stack::Stack;
-use native_tls::{self,Identity};
-use tokio_tls;
-
 use base64;
 
-pub(crate) type BoxedError = Box<::std::error::Error + Send + Sync>;
-pub(crate) type BoxedFuture = Box<Future<Item=Response<Body>, Error=BoxedError> + Send>;
+//pub(crate) type BoxedError = Box<::std::error::Error>;
+//pub(crate) type BoxedFuture = Box<Future<Item=HttpResponse, Error=BoxedError>>;
+//
+//pub(crate) fn box_error(e: impl std::error::Error + Send + Sync + 'static) -> BoxedError {
+//    Box::new(e)
+//}
 
 // helpers.
-pub(crate) fn http_error(code: StatusCode, msg: &'static str) -> BoxedFuture {
+pub(crate) fn http_error(code: StatusCode, msg: &'static str) -> HttpResponse {
     debug!("{}", msg);
     let msg = msg.to_string() + "\n";
-    let r = Response::builder()
+    HttpResponse::build(code)
         .header(header::CONTENT_TYPE, "text/plain")
-        .status(code)
-        .body(msg.into()).unwrap();
-    Box::new(future::ok(r))
+        .body(msg)
 }
 
 // helpers.
-pub(crate) fn http_unauthorized() -> BoxedFuture {
+pub(crate) fn http_unauthorized() -> HttpResponse {
     debug!("401 Unauthorized");
-    let r = Response::builder()
+    HttpResponse::Unauthorized()
         .header(header::CONTENT_TYPE, "text/plain")
         .header(header::WWW_AUTHENTICATE, "Basic realm=\"webnis\"")
-        .status(StatusCode::UNAUTHORIZED)
-        .body("Unauthorized - send basic auth\n".into()).unwrap();
-    Box::new(future::ok(r))
+        .body("Unauthorized - send basic auth\n")
 }
 
-pub(crate) fn json_error(outer_code: StatusCode, inner_code: Option<StatusCode>, msg: &str) -> BoxedFuture {
+pub(crate) fn json_error(outer_code: StatusCode, inner_code: Option<StatusCode>, msg: &str) -> HttpResponse {
     let body = json!({
         "error": {
             "code":     inner_code.unwrap_or(outer_code.clone()).as_u16(),
@@ -54,57 +46,59 @@ pub(crate) fn json_error(outer_code: StatusCode, inner_code: Option<StatusCode>,
     debug!("{}", body);
     let body = body.to_string() + "\n";
 
-    let r = Response::builder()
+    HttpResponse::build(outer_code)
         .header(header::CONTENT_TYPE, "application/json")
-        .status(outer_code)
-        .body(body.into()).unwrap();
-    Box::new(future::ok(r))
+        .body(body)
 }
 
-pub(crate) fn json_result(code: StatusCode, msg: &serde_json::Value) -> BoxedFuture {
+pub(crate) fn json_result(code: StatusCode, msg: &serde_json::Value) -> HttpResponse {
     let body = json!({
         "result": msg
     });
     let body = body.to_string() + "\n";
 
-    let r = Response::builder()
+    HttpResponse::build(code)
         .header(header::CONTENT_TYPE, "application/json")
-        .status(code)
-        .body(body.into()).unwrap();
-    Box::new(future::ok(r))
+        .body(body)
 }
 
-pub(crate) fn box_error(e: impl std::error::Error + Send + Sync + 'static) -> BoxedError {
-    Box::new(e)
+/// decode POST body into simple key/value.
+///
+/// Now wouldn't it be great if we could use serde_urlencoded! Unfortunately
+/// there's no support for non-UTF8 strings (nope, OsString / Vec<u8> do not work)
+pub fn decode_post_body(body: &[u8]) -> HashMap<String, Vec<u8>> {
+    let mut hm = HashMap::new();
+
+    for kv in body.split(|&b| b == b'&') {
+        let mut w = kv.splitn(2, |&b| b == b'=');
+        let (k, v) = (w.next().unwrap(), w.next().unwrap_or(b""));
+        let k = percent_decode(k).if_any().unwrap_or(k.to_vec());
+        let v = percent_decode(v).if_any().unwrap_or(v.to_vec());
+        if let Ok(k) = String::from_utf8(k) {
+            hm.insert(k, v);
+        }
+    }
+    hm
 }
 
-fn read_pems(key: impl AsRef<Path>, cert: impl AsRef<Path>, password: &str) -> io::Result<Vec<u8>> {
-    let b = std::fs::read_to_string(key)?;
-    let pkey = if password.len() > 0 {
-		PKey::private_key_from_pem_passphrase(b.as_bytes(), password.as_bytes())
-	} else {
-		PKey::private_key_from_pem(b.as_bytes())
-	}?;
-    let b = std::fs::read_to_string(cert)?;
-    let mut certs = X509::stack_from_pem(b.as_bytes())?;
-    let cert = certs.remove(0);
-    let mut stack = Stack::<X509>::new().unwrap();
-    certs.into_iter().for_each(|x| stack.push(x).unwrap());
-    let mut builder = Pkcs12::builder();
-    builder.ca(stack);
-    let nickname = "certfile";
-    let pkcs12 = builder.build("", nickname, &pkey, &cert)?;
-    Ok(pkcs12.to_der()?)
+/// Login / password from POST body.
+pub struct AuthInfo {
+    pub username:   String,
+    pub password:   Vec<u8>,
 }
-
-pub fn acceptor_from_pem_files(key: impl AsRef<Path>, cert: impl AsRef<Path>, password: &str) -> io::Result<tokio_tls::TlsAcceptor> {
-    let der = read_pems(key, cert, password)?;
-    let cert = Identity::from_pkcs12(&der, "").map_err(|e| Error::new(ErrorKind::Other, e))?;
-    let tls_cx = native_tls::TlsAcceptor::builder(cert).build().map_err(|e| Error::new(ErrorKind::Other, e))?;
-    Ok(tokio_tls::TlsAcceptor::from(tls_cx))
+    
+impl AuthInfo {
+    /// Decode POST body into a AuthInfo struct
+    pub fn from_post_body(body: &[u8]) -> Option<AuthInfo> {
+        let hm = decode_post_body(body);
+        let username = std::str::from_utf8(hm.get("username")?).ok()?.to_string();
+        let password = hm.get("password")?.to_vec();
+        Some(AuthInfo{ username, password })
+    }
 }
 
 #[derive(Debug,PartialEq)]
+/// Result from check_basic_auth
 pub enum AuthResult {
     // no (matching) authorization header
     NoAuth,

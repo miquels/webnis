@@ -27,6 +27,9 @@ pub enum DbError {
     MapNotFound,
     /// ditto but for any other error.
     Other,
+    /// wat doe ik hierrr
+    SerializeJson,
+    UnknownFormat,
 }
 
 pub fn gdbm_lookup(db_path: impl AsRef<str>, key: &str) -> Result<String, DbError> {
