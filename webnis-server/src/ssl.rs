@@ -1,7 +1,8 @@
 use std::io;
 use std::process::exit;
 
-use openssl::ssl::{SslAcceptorBuilder, SslAcceptor, SslFiletype, SslMethod};
+use openssl::ssl;
+use openssl::ssl::{SslAcceptorBuilder, SslAcceptor, SslFiletype, SslMethod, SslOptions, SslSessionCacheMode};
 
 use super::PROGNAME;
 use super::config::Config;
@@ -16,6 +17,20 @@ pub fn acceptor(keyfile: &str, chainfile: &str) -> io::Result<SslAcceptorBuilder
     builder
 		.set_certificate_chain_file(chainfile)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}: {}", keyfile, e)))?;
+    builder.set_verify(ssl::SslVerifyMode::NONE);
+
+    let mut options = ssl::SslOptions::empty();
+    options.insert(SslOptions::NO_COMPRESSION);
+    options.insert(SslOptions::CIPHER_SERVER_PREFERENCE);
+    options.insert(SslOptions::NO_SSLV2);
+    options.insert(SslOptions::NO_SSLV3);
+    options.insert(SslOptions::NO_TLSV1);
+    options.insert(SslOptions::NO_TLSV1_1);
+    builder.set_options(options);
+
+    let mode = SslSessionCacheMode::SERVER;
+    builder.set_session_cache_mode(mode);
+
 	Ok(builder)
 }
 
