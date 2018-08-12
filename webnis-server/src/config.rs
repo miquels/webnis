@@ -1,8 +1,7 @@
 
 use std;
-use std::io::prelude::*;
 use std::io;
-use std::fs::File;
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
@@ -22,6 +21,7 @@ pub struct Config {
     #[serde(default)]
     pub shells:     HashMap<String, Shells>,
     pub lua:        Option<LuaConfig>,
+    pub include_maps:   Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -51,10 +51,14 @@ pub struct Domain {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Auth {
+    #[serde(default)]
     pub map:            String,
+    #[serde(default)]
     pub key:            String,
     #[serde(default)]
     pub shells:         String,
+    #[serde(default)]
+    pub lua:            String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -74,9 +78,14 @@ pub struct Map {
     pub keys:       Vec<String>,
     #[serde(default)]
     pub key_alias:  HashMap<String, String>,
+    /// format: kv, json, passwd, wsv
     pub map_format: Option<String>,
+    /// type: gdbm, json, lua
     pub map_type:   String,
+    /// filename, or lua function.
     pub map_file:   String,
+    /// optional args for types like 'wsv'
+    pub map_args:   Option<HashMap<String, String>>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -109,15 +118,32 @@ impl ToSocketAddrs for OneOrManyAddr {
     }
 }
 
-pub fn read(name: &str) -> io::Result<Config> {
-    let mut f = File::open(name)?;
-    let mut buffer = String::new();
-    f.read_to_string(&mut buffer)?;
+pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
+    let buffer = std::fs::read_to_string(&toml_file)?;
 
     let mut config : Config = match toml::from_str(&buffer) {
         Ok(v) => Ok(v),
         Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
     }?;
+
+    if let Some(ref extra) = config.include_maps {
+        let include_maps = match toml_file.as_ref().parent() {
+            Some(parent) => parent.join(Path::new(extra)),
+            None => PathBuf::from(extra),
+        };
+        let buffer = std::fs::read_to_string(&include_maps)
+            .map_err(|e| io::Error::new(e.kind(), format!("{:?}: {}", include_maps, e)))?;
+        let maps : HashMap<String, MapOrMaps> = match toml::from_str(&buffer) {
+            Ok(v) => Ok(v),
+            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData,
+                                    format!("include_maps {:?}: {}", include_maps, e))),
+        }?;
+        for (name, map) in maps.into_iter() {
+            config.map.insert(name, map);
+        }
+    }
+
+    // Build the `map_ `HashMap.
     for (k, v) in config.map.iter() {
         let mut mm = Vec::new();
         match v {
@@ -130,6 +156,30 @@ pub fn read(name: &str) -> io::Result<Config> {
         config.map_.insert(k.to_string(), mm);
     }
 
+    // Check domains for validity
+    for d in &config.domain {
+        if let Some(ref auth_name) = d.auth {
+            let auth = match config.auth.get(auth_name) {
+                None => return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                   format!("config: domain {}: auth {} not defined", d.name, auth_name))),
+                Some(a) => a,
+            };
+            if !auth.map.is_empty() && !auth.lua.is_empty() {
+                return Err(io::Error::new(io::ErrorKind::InvalidData,
+                           format!("config: auth {}: cannot set both 'map' and 'lua'", auth_name)));
+            }
+            if auth.map.is_empty() && auth.lua.is_empty() {
+                return Err(io::Error::new(io::ErrorKind::InvalidData,
+                           format!("config: auth {}: must set 'map' or 'lua'", auth_name)));
+            }
+            if !auth.map.is_empty() && auth.key.is_empty() {
+                return Err(io::Error::new(io::ErrorKind::InvalidData,
+                           format!("config: auth {}: 'key' not set", auth_name)));
+            }
+        }
+    }
+
+    // Check if TLS settings are valid.
     if config.server.tls {
         if config.server.key_file.is_none() && config.server.crt_file.is_none() {
                 return Err(io::Error::new(io::ErrorKind::InvalidData,
