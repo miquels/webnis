@@ -21,6 +21,7 @@ pub struct Config {
     pub auth:       HashMap<String, Auth>,
     #[serde(default)]
     pub shells:     HashMap<String, Shells>,
+    pub lua:        Option<LuaConfig>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -66,6 +67,8 @@ pub struct Shells {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Map {
+    #[serde(skip, default)]
+    pub name:       String,
     pub key:        Option<String>,
     #[serde(default)]
     pub keys:       Vec<String>,
@@ -74,6 +77,11 @@ pub struct Map {
     pub map_format: Option<String>,
     pub map_type:   String,
     pub map_file:   String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct LuaConfig {
+    pub script:         String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -115,6 +123,9 @@ pub fn read(name: &str) -> io::Result<Config> {
         match v {
             MapOrMaps::Map(m) => mm.push(m.to_owned()),
             MapOrMaps::Maps(m) => mm.extend(m.values().map(|v| v.to_owned())),
+        }
+        for m in &mut mm {
+            m.name = k.to_string();
         }
         config.map_.insert(k.to_string(), mm);
     }

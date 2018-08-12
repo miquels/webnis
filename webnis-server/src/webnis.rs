@@ -9,6 +9,7 @@ use super::util::*;
 use super::config;
 use super::db;
 use super::format;
+use super::lua;
 
 use actix_web::HttpResponse;
 use actix_web::http::StatusCode;
@@ -118,6 +119,7 @@ impl Webnis {
         let res = match map.map_type.as_str() {
             "gdbm" => self.lookup_gdbm_map(domain, map, keyval),
             "json" => self.lookup_json_map(domain, map, keyname, keyval),
+            "lua" => self.lookup_lua_map(domain, map, keyname, keyval),
             _ => return json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Unsupported database format"),
         };
         match res {
@@ -127,6 +129,29 @@ impl Webnis {
             Err(DbError::SerializeJson) => json_error(StatusCode::NOT_FOUND, None, "Serialize error"),
             Err(DbError::Other) => json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Error reading database"),
             Ok(r) => json_result(StatusCode::OK, &r),
+        }
+    }
+
+    pub fn map_lookup(&self, domain: &str, mapname: &str, keyname: &str, keyval: &str) -> Result<serde_json::Value, DbError> {
+
+        // lookup domain in config
+        // XXX FIXME second time we do this lookup. we need to start carrying some per-request state.
+        let domain = match self.inner.config.find_domain(&domain) {
+            None => return Err(DbError::Other),
+            Some(d) => d,
+        };
+
+        // find the map 
+        let (map, keyname) = match self.inner.config.find_map(mapname, keyname) {
+            None => return Err(DbError::Other),
+            Some(m) => m,
+        };
+
+        // do lookup
+        match map.map_type.as_str() {
+            "gdbm" => self.lookup_gdbm_map(domain, map, keyval),
+            "json" => self.lookup_json_map(domain, map, keyname, keyval),
+            _ => Err(DbError::Other),
         }
     }
 
@@ -140,9 +165,16 @@ impl Webnis {
         format::line_to_json(&line, &format).map_err(|_| DbError::SerializeJson)
     }
 
-    fn lookup_json_map(&self, dom: &config::Domain, map: &config::Map, keyname:&str, keyval: &str) -> Result<serde_json::Value, DbError> {
+    fn lookup_json_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, DbError> {
         let path = format!("{}/{}", dom.db_dir, map.map_file);
         db::json_lookup(path, keyname, keyval)
+    }
+
+    fn lookup_lua_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, DbError> {
+        match lua::lua_map(&map.map_file, &dom.name, keyname, keyval) {
+            Ok(m) => Ok(m),
+            Err(e) => Err(DbError::Other),
+        }
     }
 
     // lookup the password for this domain

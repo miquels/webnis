@@ -1,4 +1,5 @@
 #[macro_use] extern crate clap;
+#[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate serde_json;
@@ -14,12 +15,14 @@ extern crate net2;
 extern crate openssl;
 extern crate percent_encoding;
 extern crate pwhash;
+extern crate rlua;
 extern crate serde;
 extern crate toml;
 
 pub(crate) mod config;
 pub(crate) mod db;
 pub(crate) mod format;
+pub(crate) mod lua;
 pub(crate) mod ssl;
 pub(crate) mod util;
 pub(crate) mod webnis;
@@ -67,8 +70,17 @@ fn main() {
 
     // arbitrary limit, really.
     raise_rlimit_nofile(64000);
-
+    
+    // initialize webnis stuff
     let webnis = Webnis::new(config.clone());
+
+    // initialize lua stuff
+    if let Some(ref l) = config.lua {
+        if let Err(e) = lua::lua_init(&l.script, webnis.clone()) {
+            eprintln!("{}: {} {}", PROGNAME, l.script, e);
+            exit(1);
+        }
+    }
 
     let sys = actix::System::new("webnis");
 
@@ -126,7 +138,7 @@ fn main() {
             },
         };
         let proto = if config.server.tls { "https" } else { "http" };
-        println!("Listening on {}://{:?}", proto, sockaddr);
+        eprintln!("Listening on {}://{:?}", proto, sockaddr);
     }
     server.start();
 

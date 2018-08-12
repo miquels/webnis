@@ -1,15 +1,18 @@
 [server]
   listen = [ "0.0.0.0:3245", "[::]:3245" ]
-  tls = true
+  #tls = true
   key_file = "/etc/ssl/private/wildcard.xs4all.net.key"
   crt_file = "/etc/ssl/certs/wildcard.xs4all.net.crt"
   cert_password = ""
 
+[lua]
+  script = "hello.lua"
+
 [[domain]]
   name = "xs4all.nl"
-  password = "donkey jaw"
+  #password = "donkey jaw"
   db_dir = "/var/yp/xs4all.nl"
-  maps = [ "passwd", "group", "gidlist", "ip.wdsl" ]
+  maps = [ "passwd", "group", "gidlist", "wdsl", "seven" ]
   default = true
   auth = "adjunct"
 
@@ -56,9 +59,17 @@
   map_type = "json"
   map_file = "gidlist"
 
-[map."ip.wdsl"]
-  key = "circuit"
+[map.seven]
+  # key is just your regular key
+  key = "user"
+  # type is lua, means it's a function we call
+  map_type   = "lua"
+  # and this is the name of the function
+  map_file = "map_seven"
+
+[map.wdsl.byname]
+  key = "user"
   map_format = "kv"
   map_type   = "gdbm"
-  map_file = "ip.wdsl.bycircuit"
+  map_file   = "ip.wdsl.byname"
 
