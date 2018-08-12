@@ -85,6 +85,7 @@ pub enum NumOrText<'a> {
     Text(&'a str),
 }
 
+/// map_format = "kv"
 #[derive(Debug, Serialize)]
 pub struct KeyValue<'a>(HashMap<&'a str, NumOrText<'a>>);
 
@@ -105,14 +106,79 @@ impl<'a> KeyValue<'a> {
     }
 }
 
-pub fn line_to_json(line: &str, format: &str) -> Result<serde_json::Value, FormatError> {
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum StringOrMap<'a> {
+    String(&'a str),
+    Map(HashMap<&'a str, &'a str>),
+}
+
+/// map_format = "fields"
+/// map_args = { field = "5", name = "gecos", separator = " " }
+/// map_args = { 1 = "email", 2 = "username", separator = " " }
+#[derive(Debug, Serialize)]
+pub struct Fields<'a>(StringOrMap<'a>);
+
+impl<'a> Fields<'a> {
+    pub fn from_line(line: &'a str, args: &'a Option<HashMap<String, String>>) -> Result<StringOrMap<'a>, FormatError> {
+        let mut separator = " ";
+        let mut field = 0;
+        let mut name = "";
+        if let Some(args) = args.as_ref() {
+            separator = args.get("separator").map(|s| s.as_str()).unwrap_or(separator);
+            field = args.get("field").and_then(|c| c.parse::<usize>().ok()).unwrap_or(0);
+            name = args.get(name).map(|s| s.as_str()).unwrap_or(name);
+        }
+
+        let separator = separator.chars().nth(0).unwrap_or(' ');
+        let fields = if separator == ' ' {
+            line.split_whitespace().collect::<Vec<_>>()
+        } else {
+            line.split(separator).collect::<Vec<_>>()
+        };
+
+        // field set, and no name: return simple string.
+        if field > 0 && name == "" {
+            if field > fields.len() {
+                return Err(FormatError);
+            }
+            return Ok(StringOrMap::String(fields[field - 1]));
+        }
+
+        // build a map.
+        let mut hm = HashMap::new();
+        if field > 0 && name != "" && field <= fields.len() {
+            // insert field "field" as "name"
+            hm.insert(name, fields[field - 1]);
+        }
+        if let Some(args) = args.as_ref() {
+            // insert fields by number.
+            for num in args.keys() {
+                if let Ok(n) = num.parse::<usize>() {
+                    if n > 0 && n <= fields.len() {
+                        hm.insert(&args[num], fields[n - 1]);
+                    }
+                } else {
+                    if num != "name" && num != "field" && num != "separator" {
+                        hm.insert(num.as_str(), &args[num]);
+                    }
+                }
+            }
+        }
+
+        Ok(StringOrMap::Map::<'a>(hm))
+    }
+}
+
+pub fn line_to_json(line: &str, format: &str, args: &Option<HashMap<String, String>>) -> Result<serde_json::Value, FormatError> {
     match format {
-        "passwd"    => serde_json::to_value(&Passwd::from_line(line)?).map_err(|_| FormatError),
-        "group"     => serde_json::to_value(&Group::from_line(line)?).map_err(|_| FormatError),
-        "adjunct"   => serde_json::to_value(&Adjunct::from_line(line)?).map_err(|_| FormatError),
-        "kv"        => serde_json::to_value(&KeyValue::from_line(line)?).map_err(|_| FormatError),
-        "json"      => serde_json::from_str(line).map_err(|_| FormatError),
-        _           => Err(FormatError),
+        "passwd"            => serde_json::to_value(&Passwd::from_line(line)?).map_err(|_| FormatError),
+        "group"             => serde_json::to_value(&Group::from_line(line)?).map_err(|_| FormatError),
+        "adjunct"           => serde_json::to_value(&Adjunct::from_line(line)?).map_err(|_| FormatError),
+        "kv"                => serde_json::to_value(&KeyValue::from_line(line)?).map_err(|_| FormatError),
+        "fields"            => serde_json::to_value(&Fields::from_line(line, args)?).map_err(|_| FormatError),
+        "json"              => serde_json::from_str(line).map_err(|_| FormatError),
+        _                   => Err(FormatError),
     }
 }
 
