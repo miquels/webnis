@@ -51,14 +51,11 @@ pub struct Domain {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Auth {
-    #[serde(default)]
-    pub map:            String,
-    #[serde(default)]
-    pub key:            String,
+    pub map:            Option<String>,
+    pub key:            Option<String>,
     #[serde(default)]
     pub shells:         String,
-    #[serde(default)]
-    pub lua:            String,
+    pub lua:            Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -166,17 +163,15 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
                                    format!("config: domain {}: auth {} not defined", d.name, auth_name))),
                 Some(a) => a,
             };
-            if !auth.map.is_empty() && !auth.lua.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                           format!("config: auth {}: cannot set both 'map' and 'lua'", auth_name)));
-            }
-            if auth.map.is_empty() && auth.lua.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                           format!("config: auth {}: must set 'map' or 'lua'", auth_name)));
-            }
-            if !auth.map.is_empty() && auth.key.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData,
+            if auth.lua.is_none() {
+                if auth.key.is_none() {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData,
                            format!("config: auth {}: 'key' not set", auth_name)));
+                }
+                if auth.map.is_none() {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData,
+                           format!("config: auth {}: 'map' not set", auth_name)));
+                }
             }
         }
     }

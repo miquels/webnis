@@ -59,53 +59,78 @@ impl Webnis {
         };
 
         // perhaps it's LUA auth?
-        if !auth.lua.is_empty() {
+        if let Some(ref lua_func) = auth.lua {
             let lauth = lua::AuthInfo{
-                username:   authinfo.username,
-                password:   authinfo.password,
+                username:       authinfo.username,
+                pct_password:   lua::bytes_to_string(&authinfo.password),
+                map:            auth.map.clone(),
+                key:            auth.key.clone(),
             };
-            let res = match lua::lua_auth(&auth.lua, &domain.name, lauth) {
+            let res = match lua::lua_auth(lua_func, &domain.name, lauth) {
                 Ok(v) => json_result(StatusCode::OK, &v),
                 Err(_) => json_error(StatusCode::FORBIDDEN, Some(StatusCode::UNAUTHORIZED), "Password incorrect"),
             };
             return res;
         }
 
-        // find the map 
-        let (map, key) = match self.inner.config.find_map(&auth.map, &auth.key) {
-            None => return json_error(StatusCode::NOT_FOUND, None, "Associated auth map not found"),
+        let auth_map = auth.map.as_ref().unwrap();
+        let auth_key = auth.key.as_ref().unwrap();
+        match self.auth_map(domain, auth_map, auth_key, &authinfo.username, &authinfo.password) {
+            Ok(true) => json_result(StatusCode::OK, &json!(true)),
+            Ok(false) => json_error(StatusCode::FORBIDDEN, Some(StatusCode::UNAUTHORIZED), "Password incorrect"),
+            Err(WnError::MapNotFound) => return json_error(StatusCode::NOT_FOUND, None, "Associated auth map not found"),
+            Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Internal server error"),
+        }
+    }
+
+    /// Authenticate using a map. We find the map, lookup the keyname/keyval (usually username).
+    /// Then if we found an entry, it is a map, and it has a "passwd" member, check the
+    /// provided password against the password in the map.
+    fn auth_map(&self, dom: &config::Domain, map: &str, key: &str, username: &str, passwd: &[u8]) -> Result<bool, WnError> {
+
+        let (map, keyname) = match self.inner.config.find_map(map, key) {
+            None => {
+                warn!("auth_map: map {} with key {} not found", map, key);
+                return Err(WnError::MapNotFound);
+            },
             Some(m) => m,
         };
 
-        // And auth on this map.
-        self.auth_map(domain, map, key, &authinfo.username, &authinfo.password)
-    }
-
-    // authenticate user using mao.
-    fn auth_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str, passwd: &[u8]) -> HttpResponse {
-
-        // do map lookup.
+        // see what type of map this is and delegate to the right lookup function.
         let res = match map.map_type.as_str() {
-            "gdbm" => self.lookup_gdbm_map(dom, map, keyval),
-            "json" => self.lookup_json_map(dom, map, keyname, keyval),
-            _ => return json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Unsupported database format"),
+            "gdbm" => self.lookup_gdbm_map(dom, map, username),
+            "json" => self.lookup_json_map(dom, map, keyname, username),
+            _ => {
+                warn!("auth_map: map {}: unsupported {}", map.name, map.map_type);
+                return Err(WnError::DbOther);
+            },
         };
-        // find the returned JSON
+
+        // did the lookup succeed?
         let json = match res {
             Ok(jv) => jv,
-            Err(_) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "No such key in map"),
+            Err(WnError::KeyNotFound) => return Ok(false),
+            Err(e) => return Err(e),
         };
 
         // extract password and auth.
-        let ok = match json.get("passwd").map(|p| p.as_str()).unwrap_or(None) {
+        let res = match json.get("passwd").map(|p| p.as_str()).unwrap_or(None) {
             None => false,
             Some(p) => pwhash::unix::verify(passwd, p),
         };
-        if ok {
-            json_result(StatusCode::OK, &json!({}))
-        } else {
-            json_error(StatusCode::FORBIDDEN, Some(StatusCode::UNAUTHORIZED), "Password incorrect")
-        }
+        Ok(res)
+    }
+
+    /// This basically is the lua map_auth() function.
+    pub fn lua_map_auth(&self, domain: &str, map: &str, key: &str, username: &str, passwd: &[u8]) -> Result<bool, WnError> {
+
+        // lookup domain in config
+        let domain = match self.inner.config.find_domain(&domain) {
+            None => return Err(WnError::DbOther),
+            Some(d) => d,
+        };
+
+        self.auth_map(domain, map, key, username, passwd)
     }
 
     // look something up in a map.
@@ -145,25 +170,33 @@ impl Webnis {
         }
     }
 
-    pub fn map_lookup(&self, domain: &str, mapname: &str, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
+    /// This basically is the lua map_lookup() function. Note that it
+    /// returns json Null if the key is not found.
+    pub fn lua_map_lookup(&self, domain: &str, mapname: &str, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
 
         // lookup domain in config
         let domain = match self.inner.config.find_domain(&domain) {
-            None => return Err(WnError::Other),
+            None => return Err(WnError::DbOther),
             Some(d) => d,
         };
 
         // find the map 
         let (map, keyname) = match self.inner.config.find_map(mapname, keyname) {
-            None => return Err(WnError::Other),
+            None => return Err(WnError::DbOther),
             Some(m) => m,
         };
 
         // do lookup
-        match map.map_type.as_str() {
+        let res = match map.map_type.as_str() {
             "gdbm" => self.lookup_gdbm_map(domain, map, keyval),
             "json" => self.lookup_json_map(domain, map, keyname, keyval),
             _ => Err(WnError::Other),
+        };
+
+        // remap KeyNotFound error to json null
+        match res {
+            Err(WnError::KeyNotFound) => Ok(json!(null)),
+            x => x,
         }
     }
 

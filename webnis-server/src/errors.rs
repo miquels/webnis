@@ -19,6 +19,10 @@ pub enum WnError {
     DeserializeData,
     #[fail(display = "Unknown format")]
     UnknownFormat,
+    #[fail(display = "Failed to execute script function")]
+    LuaError,
+    #[fail(display = "Script function not found")]
+    LuaFunctionNotFound,
     #[fail(display = "Failed")]
     Other,
 }
@@ -28,12 +32,14 @@ pub(crate) fn multiline<'a>(s: &'a str) -> impl Iterator<Item = &'a str> {
     s.split('\n').filter(|l| l != &"")
 }
 
+pub use log::Level as LogLevel;
+
 /// multi-line error. todo: tabs.
 macro_rules! merror {
      ($($arg:tt)*) => (
-        if log_enabled!(log::Level::Error) {
+        if log_enabled!(LogLevel::Error) {
             let txt = format!($($arg)*);
-            errors::multiline(&txt).for_each(|m| error!("{}", m));
+            $crate::errors::multiline(&txt).for_each(|m| error!("{}", m));
         }
     );
 }
