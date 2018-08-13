@@ -1,4 +1,5 @@
 #[macro_use] extern crate clap;
+#[macro_use] extern crate failure_derive;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
@@ -7,6 +8,7 @@ extern crate actix;
 extern crate actix_web;
 extern crate base64;
 extern crate env_logger;
+extern crate failure;
 extern crate futures;
 extern crate gdbm;
 extern crate http;
@@ -21,6 +23,7 @@ extern crate toml;
 
 pub(crate) mod config;
 pub(crate) mod db;
+pub(crate) mod errors;
 pub(crate) mod format;
 pub(crate) mod lua;
 pub(crate) mod ssl;

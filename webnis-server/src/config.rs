@@ -84,8 +84,10 @@ pub struct Map {
     pub map_type:   String,
     /// filename, or lua function.
     pub map_file:   String,
-    /// optional args for types like 'wsv'
+    /// optional args for types like 'fields'
     pub map_args:   Option<HashMap<String, String>>,
+    /// override map for this map.
+    pub map_override: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

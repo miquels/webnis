@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use serde_json;
 use pwhash;
 
-use db::DbError;
+use errors::WnError;
 use super::util::*;
 use super::config;
 use super::db;
@@ -57,6 +57,19 @@ impl Webnis {
             None => return json_error(StatusCode::NOT_FOUND, None, "Authentication not enabled"),
             Some(a) => a,
         };
+
+        // perhaps it's LUA auth?
+        if !auth.lua.is_empty() {
+            let lauth = lua::AuthInfo{
+                username:   authinfo.username,
+                password:   authinfo.password,
+            };
+            let res = match lua::lua_auth(&auth.lua, &domain.name, lauth) {
+                Ok(v) => json_result(StatusCode::OK, &v),
+                Err(_) => json_error(StatusCode::FORBIDDEN, Some(StatusCode::UNAUTHORIZED), "Password incorrect"),
+            };
+            return res;
+        }
 
         // find the map 
         let (map, key) = match self.inner.config.find_map(&auth.map, &auth.key) {
@@ -123,27 +136,26 @@ impl Webnis {
             _ => return json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Unsupported database format"),
         };
         match res {
-            Err(DbError::NotFound) => json_error(StatusCode::NOT_FOUND, None, "No such key in map"),
-            Err(DbError::MapNotFound) => json_error(StatusCode::NOT_FOUND, None, "No such map"),
-            Err(DbError::UnknownFormat) => json_error(StatusCode::NOT_FOUND, None, "Unknown map format"),
-            Err(DbError::SerializeJson) => json_error(StatusCode::NOT_FOUND, None, "Serialize error"),
-            Err(DbError::Other) => json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Error reading database"),
+            Err(WnError::KeyNotFound) => json_error(StatusCode::NOT_FOUND, None, "No such key in map"),
+            Err(WnError::MapNotFound) => json_error(StatusCode::NOT_FOUND, None, "No such map"),
+            Err(WnError::UnknownFormat) => json_error(StatusCode::NOT_FOUND, None, "Unknown map format"),
+            Err(WnError::SerializeJson(_)) => json_error(StatusCode::NOT_FOUND, None, "Serialize error"),
+            Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Error reading database"),
             Ok(r) => json_result(StatusCode::OK, &r),
         }
     }
 
-    pub fn map_lookup(&self, domain: &str, mapname: &str, keyname: &str, keyval: &str) -> Result<serde_json::Value, DbError> {
+    pub fn map_lookup(&self, domain: &str, mapname: &str, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
 
         // lookup domain in config
-        // XXX FIXME second time we do this lookup. we need to start carrying some per-request state.
         let domain = match self.inner.config.find_domain(&domain) {
-            None => return Err(DbError::Other),
+            None => return Err(WnError::Other),
             Some(d) => d,
         };
 
         // find the map 
         let (map, keyname) = match self.inner.config.find_map(mapname, keyname) {
-            None => return Err(DbError::Other),
+            None => return Err(WnError::Other),
             Some(m) => m,
         };
 
@@ -151,29 +163,29 @@ impl Webnis {
         match map.map_type.as_str() {
             "gdbm" => self.lookup_gdbm_map(domain, map, keyval),
             "json" => self.lookup_json_map(domain, map, keyname, keyval),
-            _ => Err(DbError::Other),
+            _ => Err(WnError::Other),
         }
     }
 
-    fn lookup_gdbm_map(&self, dom: &config::Domain, map: &config::Map, keyval: &str) -> Result<serde_json::Value, DbError> {
+    fn lookup_gdbm_map(&self, dom: &config::Domain, map: &config::Map, keyval: &str) -> Result<serde_json::Value, WnError> {
         let format = match map.map_format {
-            None => return Err(DbError::UnknownFormat),
+            None => return Err(WnError::UnknownFormat),
             Some(ref s) => s,
         };
         let path = format!("{}/{}", dom.db_dir, map.map_file);
         let line = db::gdbm_lookup(&path, keyval)?;
-        format::line_to_json(&line, &format).map_err(|_| DbError::SerializeJson)
+        format::line_to_json(&line, &format, &map.map_args)
     }
 
-    fn lookup_json_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, DbError> {
+    fn lookup_json_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
         let path = format!("{}/{}", dom.db_dir, map.map_file);
         db::json_lookup(path, keyname, keyval)
     }
 
-    fn lookup_lua_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, DbError> {
+    fn lookup_lua_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
         match lua::lua_map(&map.map_file, &dom.name, keyname, keyval) {
             Ok(m) => Ok(m),
-            Err(e) => Err(DbError::Other),
+            Err(_) => Err(WnError::Other),
         }
     }
 

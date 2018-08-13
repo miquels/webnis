@@ -5,14 +5,14 @@ use std::sync::Mutex;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use super::webnis::Webnis;
-use super::db::DbError;
-
 use serde_json;
 use serde_json::Value as JValue;
 
 //use rlua::{Function, Lua, MetaMethod, Result, UserData, UserDataMethods, Variadic};
-use rlua::{self, Function, Lua};
+use rlua::{self, Function, Lua, MetaMethod, UserData, UserDataMethods};
+
+use webnis::Webnis;
+use errors::*;
 
 // main info that interpreter instances use to initialize.
 struct LuaMaster {
@@ -23,7 +23,6 @@ struct LuaMaster {
 
 // per-instance interpreter state.
 struct LuaState {
-    webnis: Webnis,
     lua:    Lua,
 }
 
@@ -54,12 +53,13 @@ fn local_lua_init() -> Option<LuaState> {
         panic!("error loading lua script {}: {}", lua_master.name, e);
     }
 
-    // add functionality.
+    // add "map_lookup" global function.
     {
         let webnis = lua_master.webnis.clone();
 
-        let map_lookup = lua.create_function(move |lua, (domain, mapname, keyname, keyvalue) : (String, String, String, String)| {
+        let map_lookup = lua.create_function(move |lua, (mapname, keyname, keyvalue) : (String, String, String)| {
             let mut v = rlua::Variadic::<rlua::Table>::new();
+            let domain : String = lua.globals().get("__domain").unwrap();
             match webnis.map_lookup(&domain, &mapname, &keyname, &keyvalue) {
                 Ok(jv) => v.push(json_value_to_lua(lua, jv)),
                 Err(_) => {},
@@ -70,7 +70,6 @@ fn local_lua_init() -> Option<LuaState> {
     }
 
     Some(LuaState{
-        webnis: lua_master.webnis.clone(),
         lua:    lua,
     })
 }
@@ -119,13 +118,8 @@ fn json_value_to_lua<'a>(lua: &'a Lua, jv: serde_json::Value) -> rlua::Table<'a>
     table
 }
 
-enum NumOrText {
-    Num(i64),
-    Text(String),
-}
-
 type LuaMap<'a> = HashMap<String, rlua::Value<'a>>;
-type JsonMap = HashMap<String, serde_json::Value>;
+//type JsonMap = HashMap<String, serde_json::Value>;
 
 fn lua_map_to_json(lua_map: LuaMap) -> serde_json::Value {
     let mut hm = serde_json::Map::new();
@@ -149,11 +143,60 @@ pub(crate) fn lua_map(mapname: &str, domain: &str, keyname: &str, keyval: &str) 
     LUA.with(|lua_tls| {
         let lua_state1 = &*lua_tls.borrow();
         let lua_state = lua_state1.as_ref().unwrap();
-        let func: Function = lua_state.lua.globals().get(mapname).unwrap();
-        let hm = func.call::<_, LuaMap>((domain, keyname, keyval)).unwrap();
+
+        let globals = lua_state.lua.globals();
+        globals.set("__domain", domain).unwrap();
+
+        let func: Function = globals.get(mapname).unwrap();
+        let hm = func.call::<_, LuaMap>((keyname, keyval)).unwrap();
         // println!("heya hm now {:#?}", hm);
         let jv = lua_map_to_json(hm);
         // println!("heya jv now {:#?}", jv);
+
+        Ok(jv)
+    })
+}
+
+/// This is a userdata struct, passed to the lua authenticate hook.
+/// It allows access to the username / email fields, but not to the
+/// password field- but it can authenticate.
+pub struct AuthInfo {
+    pub username:   String,
+    pub password:   Vec<u8>,
+}
+
+impl UserData for AuthInfo {
+    fn add_methods(methods: &mut UserDataMethods<Self>) {
+        methods.add_meta_method(MetaMethod::Index, |_, this: &AuthInfo, arg: String| {
+            match arg.as_str() {
+                "username" => Ok(Some(this.username.clone())),
+                "password" => Ok(Some("x".to_string())),
+                _ => Ok(None),
+            }
+        });
+        methods.add_method("verify", |_, this: &AuthInfo, arg: String| {
+            println!("verify({}) called", arg);
+            Ok(true)
+        });
+    }
+}
+
+/// lua_auth calls a lua function. The return value is always a map.
+pub(crate) fn lua_auth(funcname: &str, domain: &str, ai: AuthInfo) -> Result<serde_json::Value, io::Error> {
+
+    LUA.with(|lua_tls| {
+        let lua_state1 = &*lua_tls.borrow();
+        let lua_state = lua_state1.as_ref().unwrap();
+
+        let globals = lua_state.lua.globals();
+        globals.set("__domain", domain).unwrap();
+
+        let func: Function = globals.get(funcname).unwrap();
+        let hm = func.call::<_, LuaMap>(ai).unwrap();
+        // println!("heya hm now {:#?}", hm);
+        let jv = lua_map_to_json(hm);
+        // println!("heya jv now {:#?}", jv);
+
         Ok(jv)
     })
 }

@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use serde_json;
+use serde;
 
-pub struct FormatError;
+use errors::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct Passwd<'a> {
@@ -16,16 +17,16 @@ pub struct Passwd<'a> {
 }
 
 impl<'a> Passwd<'a> {
-    pub fn from_line(line: &'a str) -> Result<Passwd<'a>, FormatError> {
+    pub fn from_line(line: &'a str) -> Result<Passwd<'a>, WnError> {
         let fields = line.split(':').collect::<Vec<_>>();
         if fields.len() != 7 {
-            return Err(FormatError);
+            return Err(WnError::DeserializeData);
         }
         let p = Passwd{
             name:   fields[0],
             passwd: fields[1],
-            uid:    fields[2].parse::<u32>().map_err(|_| FormatError)?,
-            gid:    fields[3].parse::<u32>().map_err(|_| FormatError)?,
+            uid:    fields[2].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
+            gid:    fields[3].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
             gecos:  fields[4],
             dir:    fields[5],
             shell:  fields[6],
@@ -41,10 +42,10 @@ pub struct Adjunct<'a> {
 }
 
 impl<'a> Adjunct<'a> {
-    pub fn from_line(line: &'a str) -> Result<Adjunct<'a>, FormatError> {
+    pub fn from_line(line: &'a str) -> Result<Adjunct<'a>, WnError> {
         let fields = line.split(':').collect::<Vec<_>>();
         if fields.len() < 2 {
-            return Err(FormatError);
+            return Err(WnError::DeserializeData);
         }
         let p = Adjunct{
             name:   fields[0],
@@ -63,15 +64,15 @@ pub struct Group<'a> {
 }
 
 impl<'a> Group<'a> {
-    pub fn from_line(line: &'a str) -> Result<Group<'a>, FormatError> {
+    pub fn from_line(line: &'a str) -> Result<Group<'a>, WnError> {
         let fields = line.split(':').collect::<Vec<_>>();
         if fields.len() != 4 {
-            return Err(FormatError);
+            return Err(WnError::DeserializeData);
         }
         let g = Group{
             name:       fields[0],
             passwd:     fields[1],
-            gid:        fields[2].parse::<u32>().map_err(|_| FormatError)?,
+            gid:        fields[2].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
             mem:        fields[3].split(',').collect::<Vec<_>>(),
         };
         Ok(g)
@@ -90,7 +91,7 @@ pub enum NumOrText<'a> {
 pub struct KeyValue<'a>(HashMap<&'a str, NumOrText<'a>>);
 
 impl<'a> KeyValue<'a> {
-    pub fn from_line(line: &str) -> Result<KeyValue, FormatError> {
+    pub fn from_line(line: &str) -> Result<KeyValue, WnError> {
         let mut hm = HashMap::new();
         for kv in line.split_whitespace() {
             let mut w = kv.splitn(2, '=');
@@ -120,7 +121,7 @@ pub enum StringOrMap<'a> {
 pub struct Fields<'a>(StringOrMap<'a>);
 
 impl<'a> Fields<'a> {
-    pub fn from_line(line: &'a str, args: &'a Option<HashMap<String, String>>) -> Result<StringOrMap<'a>, FormatError> {
+    pub fn from_line(line: &'a str, args: &'a Option<HashMap<String, String>>) -> Result<StringOrMap<'a>, WnError> {
         let mut separator = " ";
         let mut field = 0;
         let mut name = "";
@@ -140,7 +141,7 @@ impl<'a> Fields<'a> {
         // field set, and no name: return simple string.
         if field > 0 && name == "" {
             if field > fields.len() {
-                return Err(FormatError);
+                return Err(WnError::DeserializeData);
             }
             return Ok(StringOrMap::String(fields[field - 1]));
         }
@@ -170,15 +171,19 @@ impl<'a> Fields<'a> {
     }
 }
 
-pub fn line_to_json(line: &str, format: &str, args: &Option<HashMap<String, String>>) -> Result<serde_json::Value, FormatError> {
+fn to_json<T: serde::Serialize>(value: T) -> Result<serde_json::Value, WnError> {
+    serde_json::to_value(value).map_err(WnError::SerializeJson)
+}
+
+pub fn line_to_json(line: &str, format: &str, args: &Option<HashMap<String, String>>) -> Result<serde_json::Value, WnError> {
     match format {
-        "passwd"            => serde_json::to_value(&Passwd::from_line(line)?).map_err(|_| FormatError),
-        "group"             => serde_json::to_value(&Group::from_line(line)?).map_err(|_| FormatError),
-        "adjunct"           => serde_json::to_value(&Adjunct::from_line(line)?).map_err(|_| FormatError),
-        "kv"                => serde_json::to_value(&KeyValue::from_line(line)?).map_err(|_| FormatError),
-        "fields"            => serde_json::to_value(&Fields::from_line(line, args)?).map_err(|_| FormatError),
-        "json"              => serde_json::from_str(line).map_err(|_| FormatError),
-        _                   => Err(FormatError),
+        "passwd"            => to_json(&Passwd::from_line(line)?),
+        "group"             => to_json(&Group::from_line(line)?),
+        "adjunct"           => to_json(&Adjunct::from_line(line)?),
+        "kv"                => to_json(&KeyValue::from_line(line)?),
+        "fields"            => to_json(&Fields::from_line(line, args)?),
+        "json"              => serde_json::from_str(line).map_err(WnError::SerializeJson),
+        _                   => Err(WnError::UnknownFormat),
     }
 }
 

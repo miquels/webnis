@@ -7,6 +7,8 @@ use std::time::SystemTime;
 use serde_json;
 use gdbm;
 
+use errors::*;
+
 struct GdbmDb {
     #[allow(unused)]
     file_name:  String,
@@ -20,19 +22,7 @@ thread_local! {
     static MAPS: RefCell<HashMap<String, GdbmDb>> = RefCell::new(HashMap::new());
 }
 
-pub enum DbError {
-    /// key not found in map.
-    NotFound,
-    /// map not found. caller might handle this as a "fail" instead of "key not found".
-    MapNotFound,
-    /// ditto but for any other error.
-    Other,
-    /// wat doe ik hierrr
-    SerializeJson,
-    UnknownFormat,
-}
-
-pub fn gdbm_lookup(db_path: impl AsRef<str>, key: &str) -> Result<String, DbError> {
+pub fn gdbm_lookup(db_path: impl AsRef<str>, key: &str) -> Result<String, WnError> {
 
     MAPS.with(|maps| {
 
@@ -57,7 +47,7 @@ pub fn gdbm_lookup(db_path: impl AsRef<str>, key: &str) -> Result<String, DbErro
 
             // no change, look up and return.
             if !reopen {
-                return db.handle.fetch(key).map_err(|_| DbError::NotFound);
+                return db.handle.fetch(key).map_err(|_| WnError::KeyNotFound);
             }
 
             remove = true;
@@ -67,24 +57,24 @@ pub fn gdbm_lookup(db_path: impl AsRef<str>, key: &str) -> Result<String, DbErro
         }
 
         // try to open, then lookup, and save handle.
-        let metadata = fs::metadata(path).map_err(|_| DbError::MapNotFound)?;
+        let metadata = fs::metadata(path).map_err(|_| WnError::MapNotFound)?;
         let handle = gdbm::Gdbm::new(Path::new(path), 0, gdbm::READER, 0)
-            .map_err(|_| DbError::MapNotFound)?;
+            .map_err(|_| WnError::MapNotFound)?;
         let db = GdbmDb{
             file_name:  path.to_string(),
             handle:     handle,
             modified:   metadata.modified().ok(),
             lastcheck:  SystemTime::now(),
         };
-        let res = db.handle.fetch(key).map_err(|_| DbError::NotFound);
+        let res = db.handle.fetch(key).map_err(|_| WnError::KeyNotFound);
         m.insert(path.to_owned(), db);
         res
     })
 }
 
-pub fn json_lookup(db_path: impl AsRef<str>, keyname: &str, keyval: &str) -> Result<serde_json::Value, DbError> {
-    let file = File::open(db_path.as_ref()).map_err(|_| DbError::MapNotFound)?;
-    let entries : serde_json::Value = serde_json::from_reader(file).map_err(|_| DbError::Other)?;
+pub fn json_lookup(db_path: impl AsRef<str>, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
+    let file = File::open(db_path.as_ref()).map_err(|_| WnError::MapNotFound)?;
+    let entries : serde_json::Value = serde_json::from_reader(file).map_err(|_| WnError::DbOther)?;
     let mut idx : usize = 0;
     let keyval = match keyval.parse::<u64>() {
         Ok(num) => json!(num),
@@ -100,6 +90,6 @@ pub fn json_lookup(db_path: impl AsRef<str>, keyname: &str, keyval: &str) -> Res
         }
         idx += 1;
     }
-    Err(DbError::NotFound)
+    Err(WnError::KeyNotFound)
 }
 

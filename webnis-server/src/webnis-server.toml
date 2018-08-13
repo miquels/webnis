@@ -1,6 +1,6 @@
 [server]
   listen = [ "0.0.0.0:3245", "[::]:3245" ]
-  #tls = true
+  tls = true
   key_file = "/etc/ssl/private/wildcard.xs4all.net.key"
   crt_file = "/etc/ssl/certs/wildcard.xs4all.net.crt"
   cert_password = ""
@@ -10,11 +10,11 @@
 
 [[domain]]
   name = "xs4all.nl"
-  #password = "donkey jaw"
+  password = "donkey jaw"
   db_dir = "/var/yp/xs4all.nl"
   maps = [ "passwd", "group", "gidlist", "wdsl", "seven" ]
   default = true
-  auth = "adjunct"
+  auth_map = "adjunct"
 
 [[domain]]
   name = "shell.xs4all.nl"
