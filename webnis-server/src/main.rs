@@ -23,6 +23,7 @@ extern crate toml;
 
 pub(crate) mod config;
 pub(crate) mod db;
+#[macro_use]
 pub(crate) mod errors;
 pub(crate) mod format;
 pub(crate) mod lua;

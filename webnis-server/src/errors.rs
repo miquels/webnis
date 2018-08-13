@@ -23,3 +23,18 @@ pub enum WnError {
     Other,
 }
 
+#[allow(dead_code)]
+pub(crate) fn multiline<'a>(s: &'a str) -> impl Iterator<Item = &'a str> {
+    s.split('\n').filter(|l| l != &"")
+}
+
+/// multi-line error. todo: tabs.
+macro_rules! merror {
+     ($($arg:tt)*) => (
+        if log_enabled!(log::Level::Error) {
+            let txt = format!($($arg)*);
+            errors::multiline(&txt).for_each(|m| error!("{}", m));
+        }
+    );
+}
+
