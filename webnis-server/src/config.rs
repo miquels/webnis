@@ -51,7 +51,7 @@ pub struct Domain {
 pub struct Auth {
     pub map:            Option<String>,
     pub key:            Option<String>,
-    pub lua:            Option<String>,
+    pub lua_function:   Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -63,12 +63,14 @@ pub struct Map {
     pub keys:       Vec<String>,
     #[serde(default)]
     pub key_alias:  HashMap<String, String>,
-    /// format: kv, json, passwd, wsv
-    pub map_format: Option<String>,
+    /// LUA function to call.
+    pub lua_function: Option<String>,
     /// type: gdbm, json, lua
     pub map_type:   String,
-    /// filename, or lua function.
-    pub map_file:   String,
+    /// format: kv, json, passwd, fields (optional for map_type "json")
+    pub map_format: Option<String>,
+    /// filename
+    pub map_file:   Option<String>,
     /// optional args for types like 'fields'
     pub map_args:   Option<HashMap<String, String>>,
     /// override map for this map.
@@ -139,6 +141,17 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
         }
         for m in &mut mm {
             m.name = k.to_string();
+            if m.lua_function.is_some() {
+                if m.map_type != "lua" {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                    format!("map {}: lua_function set, map_type must be \"lua\"", m.name)));
+                }
+            } else {
+                if m.map_file.is_none() {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                    format!("map {}: map_file not set", m.name)));
+                }
+            }
         }
         config.map_.insert(k.to_string(), mm);
     }
@@ -151,7 +164,7 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
                                    format!("config: domain {}: auth {} not defined", d.name, auth_name))),
                 Some(a) => a,
             };
-            if auth.lua.is_none() {
+            if auth.lua_function.is_none() {
                 if auth.key.is_none() {
                     return Err(io::Error::new(io::ErrorKind::InvalidData,
                            format!("config: auth {}: 'key' not set", auth_name)));

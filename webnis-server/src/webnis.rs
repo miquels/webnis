@@ -59,7 +59,7 @@ impl Webnis {
         };
 
         // perhaps it's LUA auth?
-        if let Some(ref lua_func) = auth.lua {
+        if let Some(ref lua_func) = auth.lua_function {
             let lauth = lua::AuthInfo{
                 username:       authinfo.username,
                 pct_password:   lua::bytes_to_string(&authinfo.password),
@@ -77,7 +77,7 @@ impl Webnis {
         let auth_map = auth.map.as_ref().unwrap();
         let auth_key = auth.key.as_ref().unwrap();
         match self.auth_map(domain, auth_map, auth_key, &authinfo.username, &authinfo.password) {
-            Ok(true) => json_result(StatusCode::OK, &json!(true)),
+            Ok(true) => json_result(StatusCode::OK, &json!({})),
             Ok(false) => json_error(StatusCode::FORBIDDEN, Some(StatusCode::UNAUTHORIZED), "Password incorrect"),
             Err(WnError::MapNotFound) => return json_error(StatusCode::NOT_FOUND, None, "Associated auth map not found"),
             Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Internal server error"),
@@ -206,18 +206,18 @@ impl Webnis {
             None => return Err(WnError::UnknownFormat),
             Some(ref s) => s,
         };
-        let path = format!("{}/{}", dom.db_dir, map.map_file);
+        let path = format!("{}/{}", dom.db_dir, map.map_file.as_ref().unwrap());
         let line = db::gdbm_lookup(&path, keyval)?;
         format::line_to_json(&line, &format, &map.map_args)
     }
 
     fn lookup_json_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
-        let path = format!("{}/{}", dom.db_dir, map.map_file);
+        let path = format!("{}/{}", dom.db_dir, map.map_file.as_ref().unwrap());
         db::json_lookup(path, keyname, keyval)
     }
 
     fn lookup_lua_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
-        match lua::lua_map(&map.map_file, &dom.name, keyname, keyval) {
+        match lua::lua_map(&map.lua_function.as_ref().unwrap(), &dom.name, keyname, keyval) {
             Ok(m) => Ok(m),
             Err(_) => Err(WnError::Other),
         }

@@ -48,7 +48,7 @@
   # the maps that a client is allowed to do a lookup in.
   maps = [ "passwd", "group", "gidlist", "lua_example" ]
   # the [auth] section to use when a client wants to check a username/password.
-  auth_map = "adjunct"
+  auth = "adjunct"
 
 # another domain.
 [[domain]]
@@ -120,5 +120,5 @@
   # type is lua, means it's a function we call
   map_type   = "lua"
   # and this is the name of the function
-  map_file = "map_example"
+  lua_function = "map_example"
 
