@@ -111,6 +111,12 @@ fn main() {
     let app_factory = move |prefix, webnis| {
             App::with_state(webnis)
                 .prefix(prefix)
+                .resource("/{domain}/map/{map}", |r| {
+                    r.method(http::Method::GET).f(handle_map);
+                    r.route()
+                        .filter(pred::Not(pred::Get()))
+                        .f(|_| HttpResponse::MethodNotAllowed());
+                })
                 .resource("/{domain}/auth", move |r| {
                     r.method(http::Method::POST)
                         .filter(pred::Header(ct, x_www_form))
@@ -122,8 +128,8 @@ fn main() {
                         .filter(pred::Not(pred::Post()))
                         .f(|_| HttpResponse::MethodNotAllowed());
                 })
-                .resource("/{domain}/map/{map}", |r| {
-                    r.method(http::Method::GET).f(handle_map);
+                .resource("/{domain}/info", |r| {
+                    r.method(http::Method::GET).f(handle_info);
                     r.route()
                         .filter(pred::Not(pred::Get()))
                         .f(|_| HttpResponse::MethodNotAllowed());
@@ -213,6 +219,17 @@ fn handle_map(req: &HttpRequest<Webnis>) -> HttpResponse {
         return denied;
     }
     req.state().handle_map(&params.0, &params.1, &req.query())
+}
+
+fn handle_info(req: &HttpRequest<Webnis>) -> HttpResponse {
+    let domain = match Path::<String>::extract(req) {
+        Err(_) => return HttpResponse::InternalServerError().body("handle_info should not fail\n"),
+        Ok(d) => d,
+    };
+    if let Some(denied) = check_authorization(req, &domain) {
+        return denied;
+    }
+    req.state().handle_info(&domain)
 }
 
 fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item=HttpResponse, Error=actix_web::Error>> {

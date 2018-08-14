@@ -39,6 +39,43 @@ impl Webnis {
 
 impl Webnis {
 
+    // show some info.
+    pub fn handle_info(&self, domain: &str) -> HttpResponse {
+
+        // lookup domain in config
+        let domain = match self.inner.config.find_domain(domain) {
+            None => return json_error(StatusCode::BAD_REQUEST, None, "Domain not found"),
+            Some(d) => d,
+        };
+
+        // build a reply object.
+        let mut maps = HashMap::new();
+        for mapname in &domain.maps {
+            let mut map_keys = Vec::new();
+            let mapvec = match self.inner.config.map_.get(mapname) {
+                Some(i) => i,
+                None => continue,
+            };
+            for m in mapvec {
+                let keys= m.key.iter().chain(m.keys.iter()).chain(m.key_alias.keys());
+                map_keys.extend(keys);
+            }
+            let mut hm = HashMap::new();
+            hm.insert("keys", map_keys);
+            maps.insert(mapname, hm);
+        }
+        #[derive(Serialize)]
+        struct Reply<T> {
+            maps:   T,
+        }
+        let r = Reply{
+            maps: maps
+        };
+        let reply = serde_json::to_value(r).unwrap();
+
+        json_result(StatusCode::OK, &reply)
+    }
+
     // authenticate user
     pub fn handle_auth(&self, domain: String, body: Vec<u8>) -> HttpResponse {
 
