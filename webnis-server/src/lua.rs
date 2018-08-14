@@ -226,6 +226,7 @@ impl UserData for AuthInfo {
 }
 
 /// lua_auth calls a lua function.
+/// returns a json value on success, json null on auth fail, error on any errors.
 pub(crate) fn lua_auth(funcname: &str, domain: &str, ai: AuthInfo) -> Result<serde_json::Value, WnError> {
 
     LUA.with(|lua_tls| {

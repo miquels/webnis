@@ -67,8 +67,9 @@ impl Webnis {
                 key:            auth.key.clone(),
             };
             let res = match lua::lua_auth(lua_func, &domain.name, lauth) {
+                Ok(serde_json::Value::Null) => json_error(StatusCode::FORBIDDEN, Some(StatusCode::UNAUTHORIZED), "Password incorrect"),
                 Ok(v) => json_result(StatusCode::OK, &v),
-                Err(_) => json_error(StatusCode::FORBIDDEN, Some(StatusCode::UNAUTHORIZED), "Password incorrect"),
+                Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Internal server error"),
             };
             return res;
         }
