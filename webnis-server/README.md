@@ -1,8 +1,20 @@
 
 # webnis-server
 
-This is a HTTPS server that servers password and group data. Currently
-it simply uses .db maps from the /var/yp/<nisdomain> directory.
+This is a HTTPS server that does two things. It serves simple key/value
+maps, and it can be used as an authentication server (against the
+data in those maps).
+
+It understands Gdbm and Json map types, and the data in those maps
+can be in serveral formats such as json, key/value, whitespace-separated
+or colon-separated, etc. So it can use NIS maps from /var/yp
+directly (with a bit of configuration).
+
+There's also a lua maptype. A lookup in a lua map calls a lua function
+that can gather data from multiple different sources.
+
+The data from the maps is always served in JSON output format, no matter
+what format the source map is in.
 
 # protocol
 
@@ -31,3 +43,4 @@ POST <BASE>/<DOMAIN>/auth
 
 For auth you need to send a `x-www-form-urlencoded` body with
 `username` and `password` parameters.
+
