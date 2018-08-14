@@ -37,7 +37,7 @@ The server supports several map types and formats.
   `name`, `passwd`, `gid`, `mem` where `mem` is an array.
 
 ### adjunct
-  >=2 colon-separated fields in /etc/passwd format. The first two fields
+  \>=2 colon-separated fields in /etc/passwd format. The first two fields
   are mapped to `name`, `passwd`, the rest is ignored.
 
 ### fields
@@ -45,7 +45,7 @@ The server supports several map types and formats.
   by the `map_args` setting, which can be in a few forms:
 
 - `{ field = "2" }` -- the Json reply is the value of the second field (string or number).
-- `{ fields = "5", name = "gecos" } -- the json reply is an object with one member, `gecos`,
+- `{ field = "5", name = "gecos" }` -- the json reply is an object with one member, `gecos`,
   and the value is that of the fifth field
 - `{ 1 = "name", 2 = "passwd", 3 = "uid", 4 = "gid" }` -- a mapping of fields to
   an object with members `name`, `passwd`, `uid` and `gid`.
@@ -57,10 +57,10 @@ The server supports several map types and formats.
 ```
 [map.passwd.byname]
   key = "name"
-  map_format = "fields"
   map_type = "gdbm"
-  map_file = "passwd.byname"
+  map_format = "fields"
   map_args = { separator = ":", 1 = "name", 2 = "passwd", 3 = "uid", 4 = "gid", 5 = "gecos", 6 = "dir", 7 = "shell" }
+  map_file = "passwd.byname"
 ```
   The `uid` and `gid` members would be output as strings instead of numbers though.
 
