@@ -22,9 +22,12 @@ use base64;
 pub(crate) fn http_error(code: StatusCode, msg: &'static str) -> HttpResponse {
     debug!("{}", msg);
     let msg = msg.to_string() + "\n";
-    HttpResponse::build(code)
-        .header(header::CONTENT_TYPE, "text/plain")
-        .body(msg)
+    let mut builder = HttpResponse::build(code);
+    if code.is_server_error() || code == StatusCode::FORBIDDEN {
+        builder.force_close();
+    }
+    builder.header(header::CONTENT_TYPE, "text/plain");
+    builder.body(msg)
 }
 
 // helpers.

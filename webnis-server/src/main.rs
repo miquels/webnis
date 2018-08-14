@@ -12,6 +12,7 @@ extern crate failure;
 extern crate futures;
 extern crate gdbm;
 extern crate http;
+extern crate ipnet;
 extern crate libc;
 extern crate net2;
 extern crate openssl;
@@ -26,13 +27,15 @@ pub(crate) mod db;
 #[macro_use]
 pub(crate) mod errors;
 pub(crate) mod format;
+pub(crate) mod iplist;
 pub(crate) mod lua;
 pub(crate) mod ssl;
 pub(crate) mod util;
 pub(crate) mod webnis;
 
-use std::net::{SocketAddr,ToSocketAddrs};
+use std::net::{SocketAddr,ToSocketAddrs,IpAddr};
 use std::process::exit;
+use std::str::FromStr;
 
 use actix_web::{
     server, pred,
@@ -42,6 +45,7 @@ use actix_web::{
     http::StatusCode,
 };
 use futures::{future,Future};
+use iplist::IpList;
 
 use util::*;
 
@@ -72,11 +76,25 @@ fn main() {
         exit(1);
     }
 
+    // read /etc/ypserv.securenets if configured.
+    let securenets = if config.server.securenets.len() > 0 {
+        let mut iplist =  IpList::new();
+        for file in &config.server.securenets {
+            if let Err(e) = config::read_securenets(&file, &mut iplist) {
+                eprintln!("{}: {}: {}", PROGNAME, file, e);
+                exit(1);
+            }
+        }
+        Some(iplist)
+    } else {
+        None
+    };
+
     // arbitrary limit, really.
     raise_rlimit_nofile(64000);
     
     // initialize webnis stuff
-    let webnis = Webnis::new(config.clone());
+    let webnis = Webnis::new(config.clone(), securenets);
 
     // initialize lua stuff
     if let Some(ref l) = config.lua {
@@ -150,7 +168,32 @@ fn main() {
 }
 
 fn check_authorization(req: &HttpRequest<Webnis>, domain: &str) -> Option<HttpResponse> {
-    let passwd = match req.state().domain_password(domain) {
+    let state = req.state();
+
+    // check the securenets access list.
+    if let Some(ref sn) = state.inner.securenets {
+        trace!("checking securenets");
+        if let Some(pa) = req.peer_addr() {
+            let mut ip = pa.ip();
+            trace!("peer ip is {}", ip);
+            if ip.is_loopback() {
+                trace!("peer ip is loopback");
+                if let Some(remote) = req.connection_info().remote() {
+                    trace!("connectioninfo remote is {}", remote);
+                    if let Ok(ipaddr) = IpAddr::from_str(remote) {
+                        ip = ipaddr;
+                    }
+                }
+            }
+            if !sn.contains(ip) && !ip.is_loopback() {
+                warn!("securenets: access denied for peer {}", ip);
+                return Some(http_error(StatusCode::FORBIDDEN, "Access denied"));
+            }
+        }
+    }
+
+    // check the password.
+    let passwd = match state.domain_password(domain) {
         None => return None,
         Some(p) => p,
     };

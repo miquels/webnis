@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use serde_json;
 use pwhash;
+use iplist::IpList;
 
 use errors::WnError;
 use super::util::*;
@@ -14,22 +15,23 @@ use super::lua;
 use actix_web::HttpResponse;
 use actix_web::http::StatusCode;
 
-#[derive(Clone,Debug)]
+#[derive(Clone)]
 pub(crate) struct Webnis {
     pub inner: Arc<WebnisInner>,
 }
 
-#[derive(Debug)]
 pub(crate) struct WebnisInner {
     pub config:     config::Config,
+    pub securenets: Option<IpList>,
 }
 
 // Create a new Webnis instance.
 impl Webnis {
-    pub fn new(config: config::Config) -> Webnis {
+    pub fn new(config: config::Config, securenets: Option<IpList>) -> Webnis {
         Webnis {
             inner: Arc::new(WebnisInner{
-                config:     config,
+                config:         config,
+                securenets:     securenets,
             })
         }
     }

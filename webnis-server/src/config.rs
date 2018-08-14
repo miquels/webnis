@@ -3,9 +3,12 @@ use std;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs, IpAddr};
+use std::net::Ipv4Addr;
+use std::str::FromStr;
 
+use iplist::IpList;
+use ipnet::{Ipv4Net,Ipv6Net,IpNet};
 use toml;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -31,6 +34,8 @@ pub struct Server {
     #[serde(default)]
     pub cert_password:  String,
     pub listen:         OneOrManyAddr,
+    #[serde(default)]
+    pub securenets: Vec<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -220,4 +225,54 @@ impl Config {
         domain.maps.iter().find(|m| m.as_str() == mapname)
             .and_then(|_| self.find_map(mapname, key))
     }
+}
+
+fn masklen(mask: &Ipv4Addr) -> u8 {
+    let v : u32 = (*mask).into();
+    for i in 0..32 {
+        if v & 2u32.pow(i) > 0 {
+            return (32 - i) as u8;
+        }
+    }
+    0
+}
+
+/// parse IP adress/mask, 2 formats:
+/// 1. 255.255.255.248 194.109.16.0
+/// 2. 194.109.16.0/27 or 2001:888:4:42::/64
+fn parse_ip(words: Vec<&str>) -> Result<IpNet, ()> {
+    if words.len() >= 2 {
+        match (words[0].parse::<Ipv4Addr>(), words[1].parse::<Ipv4Addr>()) {
+            (Ok(mask), Ok(ip)) => {
+                let ipnet = Ipv4Net::new(ip, masklen(&mask)).unwrap();
+                return Ok(ipnet.into());
+            },
+            _ => {},
+        }
+    }
+    if !words[0].contains('/') {
+        return match IpAddr::from_str(words[0]) {
+            Ok(IpAddr::V4(ip)) => Ok(Ipv4Net::new(ip, 32).unwrap().into()),
+            Ok(IpAddr::V6(ip)) => Ok(Ipv6Net::new(ip, 128).unwrap().into()),
+            Err(_) => Err(()),
+        };
+    }
+    IpNet::from_str(words[0]).map_err(|_| ())
+}
+
+/// Read a file in the NIS ypserv.securenets format.
+pub fn read_securenets(file: impl AsRef<Path>, iplist: &mut IpList) -> io::Result<()> {
+    let buffer = std::fs::read_to_string(&file)?;
+    for line in buffer.split('\n') {
+        let line = line.trim_left();
+        if line.is_empty() || line.starts_with("#") {
+            continue;
+        }
+        let words = line.split_whitespace().collect::<Vec<_>>();
+        if let Ok(ipnet) = parse_ip(words) {
+            iplist.add(ipnet);
+        }
+    }
+    iplist.finalize();
+    Ok(())
 }
