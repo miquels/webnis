@@ -1,34 +1,82 @@
+# This is the configuration file for webnis-server.
+#
+# The flow for a map lookup is:
+#
+# - the request url has a 'domain', 'map', 'keyname' and 'keyvalue'.
+#   e.g. https://server/.well-known/webnis/<domain>/<map>?<keyname>=<keyvalue>
+# - find the [[domain]] from the client's request URL
+# - the domain has a authorization password. check it.
+# - see if a lookup in 'map' is allowed for this domain.
+# - find the 'map' in the configuration (map name and keyname must both match)
+# - lookup the key 'keyname' with value 'keyvalue' in the map and return it.
+#
+# The flow for authentication is:
+# - the the url contains a 'domain'. the request uses the POST method, the
+#   type is "x-www-form-urlencoded", and a 'username' and 'pasword' are
+#   sent in the request body.
+# - find the [[domain]] from the client's request URL
+# - the domain has a authorization password. check it.
+# - the domain has an "auth_map" key, it points to an "auth" section
+#   e.g. auth_map = "xs4all" -> [auth.xs4all].
+# - the auth section tells the server what map to use, and the key
+#   to use for the username lookup.
+# - if an entry is found, and it has a "passwd" field with an encrypted
+#   password, check the passsword the client sent against that.
+#
+
+# server general configuration.
 [server]
+  # address / port to listen on.
   listen = [ "0.0.0.0:3245", "[::]:3245" ]
+  # if tls is enabled, key_file and crt_file must be set as well.
   tls = true
   key_file = "/etc/ssl/private/wildcard.xs4all.net.key"
   crt_file = "/etc/ssl/certs/wildcard.xs4all.net.crt"
-  cert_password = ""
 
+# putting a lua script name here enables LUA scripting.
 [lua]
-  script = "hello.lua"
+  script = "business-logic.lua"
 
+# multiple domains can be configured.
 [[domain]]
   name = "xs4all.nl"
+  # if this is set, the client must send a Authorization: header
+  # with Basic auth. The username is ignored, only the password is checked.
   password = "donkey jaw"
+  # database directory of the maps. this can be different per domain.
   db_dir = "/var/yp/xs4all.nl"
-  maps = [ "passwd", "group", "gidlist", "wdsl", "seven" ]
-  default = true
+  # the maps that a client is allowed to do a lookup in.
+  maps = [ "passwd", "group", "gidlist", "lua_example" ]
+  # the [auth] section to use when a client wants to check a username/password.
   auth_map = "adjunct"
 
+# another domain.
 [[domain]]
   name = "shell.xs4all.nl"
   db_dir = "/var/yp/shell.xs4all.nl"
   maps = [ "passwd", "group" ]
 
+# authentication section. this says that the username must be looked up
+# in the map "adjunct", which is defined in a [map.adjunct] section below.
+# note that the client is not allowed to do a direct lookup in that map!
 [auth.adjunct]
+  # mapname
   map = "adjunct"
+  # key to use
   key = "name"
+  # if set, the user's shell must match on of these.
   shells = "normal"
 
+# definition of allowed shells.
 [shells.normal]
   allow = [ "bash", "csh", "ksh", "sh", "tcsh", "zsh" ]
 
+# password map. note that the section name consists of three
+# parts, separated by dots map. <MAPNAME> . <some identifier>
+# if you need the MAPNAME to contain a dot, use double quotes.
+#
+# this entry is matched when the map name is "passwd", and the
+# lookup key is "name" (or "user", since we defined a key alias).
 [map.passwd.byname]
   key = "name"
   key_alias = { user = "name" }
@@ -36,40 +84,47 @@
   map_type   = "gdbm"
   map_file   = "passwd.byname"
 
+# this entry is matched when the map name is "passwd", and the
+# lookup key is "uid".
 [map.passwd.byuid]
   key = "uid"
   map_format = "passwd"
   map_type   = "gdbm"
   map_file = "passwd.byuid"
 
+# this section is (as we have configured it here) not available for lookups
+# directly, but the [auth.adjunct] section refers to it.
 [map.adjunct]
   key = "name"
   map_format = "adjunct"
   map_type   = "gdbm"
   map_file = "passwd.adjunct.byname"
 
+# The maptype here is "json", which means that the file contains
+# a JSON array, and each array element contains a group object.
+# The objects can be looked up by "name" and "gid".
 [map.group]
   keys = [ "name", "gid" ]
   map_type = "json"
   map_file = "group"
 
+# This is a Linux specific maptype, used by the glibc NSS implementation.
+# It is used to find all the groups that a user is a member of. Rather
+# than scanning the entire "group" map, we have a direct
+# username -> grouplist map.
 [map.gidlist]
   [map.gidlist.json]
   key = "name"
   map_type = "json"
   map_file = "gidlist"
 
-[map.seven]
+# When a lookup is done in this map, the LUA function "map_example"
+# is called, which is defined in the "business-logic.lua" script.
+[map.lua_example]
   # key is just your regular key
   key = "user"
   # type is lua, means it's a function we call
   map_type   = "lua"
   # and this is the name of the function
-  map_file = "map_seven"
-
-[map.wdsl.byname]
-  key = "user"
-  map_format = "kv"
-  map_type   = "gdbm"
-  map_file   = "ip.wdsl.byname"
+  map_file = "map_example"
 
