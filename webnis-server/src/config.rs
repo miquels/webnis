@@ -18,8 +18,6 @@ pub struct Config {
     pub map_:       HashMap<String, Vec<Map>>,
     #[serde(default)]
     pub auth:       HashMap<String, Auth>,
-    #[serde(default)]
-    pub shells:     HashMap<String, Shells>,
     pub lua:        Option<LuaConfig>,
     pub include_maps:   Option<String>,
 }
@@ -53,17 +51,7 @@ pub struct Domain {
 pub struct Auth {
     pub map:            Option<String>,
     pub key:            Option<String>,
-    #[serde(default)]
-    pub shells:         String,
     pub lua:            Option<String>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct Shells {
-    #[serde(default)]
-    pub allow:          Vec<String>,
-    #[serde(default)]
-    pub deny:           Vec<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

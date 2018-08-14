@@ -64,12 +64,6 @@
   map = "adjunct"
   # key to use
   key = "name"
-  # if set, the user's shell must match on of these.
-  shells = "normal"
-
-# definition of allowed shells.
-[shells.normal]
-  allow = [ "bash", "csh", "ksh", "sh", "tcsh", "zsh" ]
 
 # password map. note that the section name consists of three
 # parts, separated by dots map. <MAPNAME> . <some identifier>
