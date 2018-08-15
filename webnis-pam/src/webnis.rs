@@ -19,16 +19,6 @@ const RETRY_DELAY_MS: u64 = 2500;
 const REQUEST_READ_TIMEOUT_MS: u64 = 2500;
 const REQUEST_WRITE_TIMEOUT_MS: u64 = 1000;
 
-// lazy static so that a first call of DEBUG() initialises the debug logger.
-lazy_static! {
-    static ref DEBUG: fn() -> () = {
-        if log_enabled!(::log::Level::Debug) {
-            ::env_logger::init();
-        }
-		|| {}
-    };
-}
-
 // the arguments that can be passed in the /etc/pam.d/FILE config file.
 #[allow(non_camel_case_types)]
 enum PamArgs {
@@ -60,14 +50,16 @@ impl PamServiceModule for Webnis {
 
         // config file cmdline args.
         let pam_args = PamArgs::parse(&args);
-        if (pam_args & PamArgs::DEBUG as u32) != 0 {
-            DEBUG();
-        }
+        let _debug = (pam_args & PamArgs::DEBUG as u32) != 0;
 
         let user = match pam.get_user(None) {
             Ok(Some(u)) => u,
             Ok(None) => return PamError::USER_UNKNOWN,
             Err(e) => return e,
+        };
+        let user = match user.to_str() {
+            Ok(s) => s,
+            Err(_) => return PamError::AUTH_ERR,
         };
 
         let pass = match pam.get_authtok(None) {
@@ -75,10 +67,10 @@ impl PamServiceModule for Webnis {
             Ok(None) => return PamError::AUTH_ERR,
             Err(e) => return e,
         };
-        let pass : String = percent_encode(&pass, QUERY_ENCODE_SET).collect();
+        let pass : String = percent_encode(pass.to_bytes(), QUERY_ENCODE_SET).collect();
 
         // run authentication.
-        match wnbind_auth(user, &pass) {
+        match wnbind_auth(user, &pass, _debug) {
             Ok(_) => PamError::SUCCESS,
             Err(e) => e,
         }
@@ -86,13 +78,16 @@ impl PamServiceModule for Webnis {
 }
 
 // open socket, auth once, read reply, return.
-fn wnbind_try(user: &str, pass: &str) -> Result<(), PamError> {
+fn wnbind_try(user: &str, pass: &str, _debug: bool) -> Result<(), PamError> {
 
     // connect to webnis-bind.
     let mut socket = match UnixStream::connect(SOCKADDR) {
         Ok(s) => s,
         Err(e) => {
-            debug!("connect to {}: {}", SOCKADDR, e);
+            #[cfg(debug_assertions)]
+            {
+                if _debug { println!("connect to {}: {}", SOCKADDR, e); }
+            }
             return Err(from_io_error(e));
         },
     };
@@ -102,7 +97,10 @@ fn wnbind_try(user: &str, pass: &str) -> Result<(), PamError> {
     // send request.
     let b = format!("auth {} {}\n", user, pass).into_bytes();
     if let Err(e) = socket.write_all(&b) {
-        debug!("write to {}: {}", SOCKADDR, e);
+        #[cfg(debug_assertions)]
+        {
+            if _debug { println!("write to {}: {}", SOCKADDR, e); }
+        }
         return Err(from_io_error(e));
     }
 
@@ -110,7 +108,10 @@ fn wnbind_try(user: &str, pass: &str) -> Result<(), PamError> {
     let mut line = String::new();
     let mut rdr = BufReader::new(socket);
     if let Err(e) = rdr.read_line(&mut line) {
-        debug!("reading from {}: {}", SOCKADDR, e);
+        #[cfg(debug_assertions)]
+        {
+            if _debug { println!("reading from {}: {}", SOCKADDR, e); }
+        }
         return Err(from_io_error(e));
     }
 
@@ -121,7 +122,10 @@ fn wnbind_try(user: &str, pass: &str) -> Result<(), PamError> {
     let code = match num.parse::<u16>() {
         Ok(c) => c,
         Err(_) => {
-            debug!("error: got garbage answer [{}]", line);
+            #[cfg(debug_assertions)]
+            {
+                if _debug { println!("error: got garbage answer [{}]", line); }
+            }
             return Err(PamError::AUTHINFO_UNAVAIL);
         },
     };
@@ -131,20 +135,26 @@ fn wnbind_try(user: &str, pass: &str) -> Result<(), PamError> {
             Ok(())
         },
 		401|403|404 => {
-            debug!("error: {}", line);
+            #[cfg(debug_assertions)]
+            {
+                if _debug { println!("error: {}", line); };
+            }
             Err(PamError::AUTH_ERR)
 		},
         _ => {
-            debug!("error: {}", line);
+            #[cfg(debug_assertions)]
+            {
+                if _debug { println!("error: {}", line); };
+            }
             Err(PamError::AUTHINFO_UNAVAIL)
         }
     }
 }
 
 // call wnbind_try() and sleep/retry once if we fail.
-fn wnbind_auth(user: &str, pass: &str) -> Result<(), PamError> {
+fn wnbind_auth(user: &str, pass: &str, _debug: bool) -> Result<(), PamError> {
     for tries in 0 .. MAX_TRIES {
-        match wnbind_try(user, pass) {
+        match wnbind_try(user, pass, _debug) {
             Ok(r) => return Ok(r),
             Err(PamError::AUTH_ERR) => return Err(PamError::AUTH_ERR),
             _ => {
