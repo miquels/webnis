@@ -66,6 +66,26 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
         return req_with_retries(&ctx, path, authorization, Some(body), 1)
     }
 
+    if request.cmd == Cmd::Servers {
+        // output the configured servers and the currently active server.
+        let (active, seqno) = {
+            let mut guard = ctx.http_client.lock().unwrap();
+            let http_client = &mut *guard;
+            let active = if http_client.client.is_none() {
+                None
+            } else {
+                Some(&ctx.config.servers[http_client.seqno % ctx.config.servers.len()])
+            };
+            (active, http_client.seqno)
+        };
+        let reply = json!({
+            "seqno":    seqno,
+            "active":   active,
+            "servers":  ctx.config.servers,
+        });
+        return Box::new(future::ok(format!("200 {}", reply.to_string())));
+    }
+
     // map lookup
     let (map, param) = match request.cmd {
         Cmd::GetPwNam => ("passwd", "name"),
@@ -253,6 +273,7 @@ pub(crate) enum Cmd {
     GetGrNam,
     GetGrGid,
     GetGidList,
+    Servers,
 }
 
 // over-engineered way to lowercase a string without allocating.
@@ -287,6 +308,7 @@ impl<'a> Request<'a> {
             "getgrnam" => (Cmd::GetGrNam, 1),
             "getgrgid" => (Cmd::GetGrGid, 1),
             "getgidlist" => (Cmd::GetGidList, 1),
+            "servers" => (Cmd::GetGidList, 0),
             _ => return Err(format!("unknown command {}", c)),
         };
         if nargs != args.len() {
