@@ -5,9 +5,8 @@ authors = ["mikevs <mikevs@xs4all.net>"]
 
 [dependencies]
 percent-encoding = "1.0.1"
-pamsm = { path = "../../pam_sm_rust" }
-#pamsm = { git = "https://github.com/miquels/pam_sm_rust", branch = "miquels" }
-#pamsm = "0.1.0"
+pamsm = { git = "https://github.com/miquels/pam_sm_rust", branch = "miquels" }
+#pamsm = "0.2.0"
 
 [lib]
 name = "pam_webnis"

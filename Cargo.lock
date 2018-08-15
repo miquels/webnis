@@ -909,6 +909,7 @@ dependencies = [
 [[package]]
 name = "pamsm"
 version = "0.2.0"
+source = "git+https://github.com/miquels/pam_sm_rust?branch=miquels#28fe647ac5ea3c08a83dc56ef766de958ce75ed9"
 dependencies = [
  "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.40 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1748,7 +1749,7 @@ dependencies = [
 name = "webnis-pam"
 version = "0.1.0"
 dependencies = [
- "pamsm 0.2.0",
+ "pamsm 0.2.0 (git+https://github.com/miquels/pam_sm_rust?branch=miquels)",
  "percent-encoding 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -1952,6 +1953,7 @@ source = "git+https://github.com/tokio-rs/tokio-tls#962d91d4919b2ce11f9bab17b581
 "checksum openssl-probe 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "77af24da69f9d9341038eba93a073b1fdaaa1b788221b00a69bce9e762cb32de"
 "checksum openssl-sys 0.9.35 (registry+https://github.com/rust-lang/crates.io-index)" = "912f301a749394e1025d9dcddef6106ddee9252620e6d0a0e5f8d0681de9b129"
 "checksum owning_ref 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "cdf84f41639e037b484f93433aa3897863b561ed65c6e59c7073d7c561710f37"
+"checksum pamsm 0.2.0 (git+https://github.com/miquels/pam_sm_rust?branch=miquels)" = "<none>"
 "checksum parking_lot 0.6.3 (registry+https://github.com/rust-lang/crates.io-index)" = "69376b761943787ebd5cc85a5bc95958651a22609c5c1c2b65de21786baec72b"
 "checksum parking_lot_core 0.2.14 (registry+https://github.com/rust-lang/crates.io-index)" = "4db1a8ccf734a7bce794cc19b3df06ed87ab2f3907036b693c68f56b4d4537fa"
 "checksum percent-encoding 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "31010dd2e1ac33d5b46a5b413495239882813e0369f8ed8a5e266f173602f831"
