@@ -1,14 +1,13 @@
-use std;
 use std::collections::HashMap;
+use std::borrow::Cow;
 
 use actix_web::HttpResponse;
 use actix_web::http::{StatusCode};
 use actix_web::http::header::{self,HeaderMap,HeaderValue};
 
-use percent_encoding::percent_decode;
-
+use percent_encoding::{DEFAULT_ENCODE_SET, percent_decode, utf8_percent_encode};
+use pwhash;
 use serde_json;
-
 use base64;
 
 //pub(crate) type BoxedError = Box<::std::error::Error>;
@@ -69,34 +68,62 @@ pub(crate) fn json_result(code: StatusCode, msg: &serde_json::Value) -> HttpResp
 ///
 /// Now wouldn't it be great if we could use serde_urlencoded! Unfortunately
 /// there's no support for non-UTF8 strings (nope, OsString / Vec<u8> do not work)
-pub fn decode_post_body(body: &[u8]) -> HashMap<String, Vec<u8>> {
+pub fn decode_post_body(body: &[u8]) -> HashMap<String, String> {
     let mut hm = HashMap::new();
 
     for kv in body.split(|&b| b == b'&') {
         let mut w = kv.splitn(2, |&b| b == b'=');
         let (k, v) = (w.next().unwrap(), w.next().unwrap_or(b""));
-        let k = percent_decode(k).if_any().unwrap_or(k.to_vec());
-        let v = percent_decode(v).if_any().unwrap_or(v.to_vec());
-        if let Ok(k) = String::from_utf8(k) {
-            hm.insert(k, v);
+        if let Ok(k) = percent_decode(k).decode_utf8() {
+            // don't percent-decode the password value.
+            let v = match k.as_ref() {
+                "password" => std::str::from_utf8(v).map(|s| s.to_string()),
+                "password_raw" => continue,
+                x => percent_decode(x.as_bytes()).decode_utf8().map(|x| x.into_owned()),
+            };
+            if let Ok(v) = v {
+                hm.insert(k.into_owned(), v);
+            }
         }
     }
     hm
 }
 
+pub(crate) fn check_unix_password(passwd: &str, pwhash: &str) -> bool {
+    let pwbytes : Cow<[u8]> = percent_decode(passwd.as_bytes()).into();
+    pwhash::unix::verify(pwbytes, pwhash)
+}
+
 /// Login / password from POST body.
+#[derive(Deserialize)]
 pub struct AuthInfo {
-    pub username:   String,
-    pub password:   Vec<u8>,
+    pub username:       String,
+    pub password:       String,
+    #[serde(flatten)]
+    pub extra:          HashMap<String, serde_json::Value>,
 }
     
 impl AuthInfo {
     /// Decode POST body into a AuthInfo struct
-    pub fn from_post_body(body: &[u8]) -> Option<AuthInfo> {
-        let hm = decode_post_body(body);
-        let username = std::str::from_utf8(hm.get("username")?).ok()?.to_string();
-        let password = hm.get("password")?.to_vec();
-        Some(AuthInfo{ username, password })
+    pub fn from_post_body(body: &[u8], is_json: bool) -> Option<AuthInfo> {
+        if is_json {
+           if let Ok(mut ai) = serde_json::from_slice::<AuthInfo>(body) {
+                if let Cow::Owned(p) = utf8_percent_encode(&ai.password, DEFAULT_ENCODE_SET).into() {
+                    ai.password = p;
+                }
+                ai.extra.remove("password_raw");
+                return Some(ai);
+            }
+            return None;
+        }
+        let mut hm = decode_post_body(body);
+        let username = hm.remove("username")?;
+        let password = hm.remove("password")?;
+        let mut extra = HashMap::new();
+        for (k, v) in hm.into_iter() {
+                extra.insert(k, json!(v));
+        }
+        Some(AuthInfo{ username, password, extra })
     }
 }
 

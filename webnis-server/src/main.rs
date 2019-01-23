@@ -53,6 +53,9 @@ use webnis::Webnis;
 
 static PROGNAME: &'static str = "webnis-server";
 
+const CT: &'static str = "content-type";
+const X_WWW_FORM: &'static str= "application/x-www-form-urlencoded";
+const APPL_JSON: &'static str= "application/json";
 
 fn main() {
 
@@ -106,8 +109,6 @@ fn main() {
 
     let sys = actix::System::new("webnis");
 
-    let ct = "content-type";
-    let x_www_form = "application/x-www-form-urlencoded";
     let app_factory = move |prefix, webnis| {
             App::with_state(webnis)
                 .prefix(prefix)
@@ -119,10 +120,10 @@ fn main() {
                 })
                 .resource("/{domain}/auth", move |r| {
                     r.method(http::Method::POST)
-                        .filter(pred::Header(ct, x_www_form))
+                        .filter(pred::Any(pred::Header(CT, X_WWW_FORM)).or(pred::Header(CT, APPL_JSON)))
                         .f(handle_auth);
                     r.method(http::Method::POST)
-                        .filter(pred::Not(pred::Header(ct, x_www_form)))
+                        .filter(pred::Not(pred::Any(pred::Header(CT, X_WWW_FORM)).or(pred::Header(CT, APPL_JSON))))
                         .f(|_| HttpResponse::UnsupportedMediaType());
                     r.route()
                         .filter(pred::Not(pred::Post()))
@@ -240,13 +241,19 @@ fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item=HttpResponse, Error
     if let Some(denied) = check_authorization(req, &domain) {
         return Box::new(future::ok(denied));
     }
+
+    let is_json = match req.request().headers().get("content-type") {
+        Some(ct) => ct == "application/json" || ct == "text/json",
+        None => false,
+    };
+
     let webnis = req.state().clone();
     let domain = domain.clone();
     req.body()
         .limit(1024)
         .from_err()
         .and_then(move |data| {
-            future::ok(webnis.handle_auth(domain, data.to_vec()).into())
+            future::ok(webnis.handle_auth(domain, is_json, data.to_vec()).into())
         })
         .responder()
 }

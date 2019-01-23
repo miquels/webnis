@@ -1,5 +1,4 @@
 
-use std;
 use std::sync::Mutex;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -8,14 +7,12 @@ use std::iter::FromIterator;
 use failure::ResultExt;
 use serde_json;
 use serde_json::Value as JValue;
-use pwhash;
-use percent_encoding;
 
 //use rlua::{Function, Lua, MetaMethod, Result, UserData, UserDataMethods, Variadic};
 use rlua::{self, Function, Lua, ToLua, MetaMethod, UserData, UserDataMethods};
 
-use webnis::Webnis;
-use errors::*;
+use crate::{Webnis, util};
+use crate::errors::*;
 
 // main info that interpreter instances use to initialize.
 struct LuaMaster {
@@ -186,41 +183,36 @@ pub(crate) fn lua_map(mapname: &str, domain: &str, keyname: &str, keyval: &str) 
     })
 }
 
-/// for round-tripping passwords as strings.
-pub(crate) fn bytes_to_string(b: &[u8]) -> String {
-    percent_encoding::percent_encode(b, percent_encoding::DEFAULT_ENCODE_SET).to_string()
-}
-
-/// for round-tripping passwords as strings.
-pub(crate) fn string_to_bytes(s: &str) -> Vec<u8> {
-    let in_bytes = s.as_bytes();
-    percent_encoding::percent_decode(in_bytes).if_any().unwrap_or(in_bytes.to_vec())
-}
-
 /// This is a userdata struct, passed to the lua authenticate hook.
 /// It allows access to the username / email fields, but not to the
 /// password field- but it can authenticate.
 pub struct AuthInfo {
     pub username:       String,
-    pub pct_password:   String,
+    pub password:       String,
     pub map:            Option<String>,
     pub key:            Option<String>,
+    pub extra:          HashMap<String, serde_json::Value>,
 }
 
 impl UserData for AuthInfo {
     fn add_methods(methods: &mut UserDataMethods<Self>) {
-        methods.add_meta_method(MetaMethod::Index, |_, this: &AuthInfo, arg: String| {
+        methods.add_meta_method(MetaMethod::Index, |lua, this: &AuthInfo, arg: String| {
             match arg.as_str() {
-                "username"  => Ok(Some(this.username.clone())),
-                "password"  => Ok(Some(this.pct_password.to_string())),
-                "map"       => Ok(this.map.clone()),
-                "key"       => Ok(this.key.clone()),
-                _ => Ok(None),
+                "username"  => this.username.clone().to_lua(lua).map(|x| Some(x)),
+                "password"  => this.password.clone().to_lua(lua).map(|x| Some(x)),
+                "map"       => this.map.clone().to_lua(lua).map(|x| Some(x)),
+                "key"       => this.key.clone().to_lua(lua).map(|x| Some(x)),
+                x => {
+                    if let Some(jv) = this.extra.get(x) {
+                        Ok(Some(json_value_to_lua(lua, jv.to_owned())))
+                    } else {
+                        Ok(None)
+                    }
+                },
             }
         });
         methods.add_method("checkpass", |_, this: &AuthInfo, arg: String| {
-            let p = string_to_bytes(&this.pct_password);
-            Ok(pwhash::unix::verify(p, &arg))
+            Ok(util::check_unix_password(&this.password, &arg))
         });
     }
 }
@@ -317,8 +309,7 @@ fn set_webnis_table(lua: &Lua, webnis: Webnis) {
                     return Err(e);
                 },
             };
-            let bytes_passwd = string_to_bytes(&password);
-            let v = match webnis.lua_map_auth(&domain, &mapname, &keyname, &username, &bytes_passwd) {
+            let v = match webnis.lua_map_auth(&domain, &mapname, &keyname, &username, &password) {
                 Ok(jv) => json_value_to_lua(lua, JValue::Bool(jv)),
                 Err(e) => {
                     warn!("map_auth {} {}={}: {}", mapname, keyname, username, e);

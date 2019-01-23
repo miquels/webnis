@@ -2,15 +2,14 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use serde_json;
-use pwhash;
 use iplist::IpList;
 
 use errors::WnError;
-use super::util::*;
-use super::config;
-use super::db;
-use super::format;
-use super::lua;
+use crate::util::*;
+use crate::config;
+use crate::db;
+use crate::format;
+use crate::lua;
 
 use actix_web::HttpResponse;
 use actix_web::http::StatusCode;
@@ -77,7 +76,7 @@ impl Webnis {
     }
 
     // authenticate user
-    pub fn handle_auth(&self, domain: String, body: Vec<u8>) -> HttpResponse {
+    pub fn handle_auth(&self, domain: String, is_json: bool, body: Vec<u8>) -> HttpResponse {
 
         // lookup domain in config
         let domain = match self.inner.config.find_domain(&domain) {
@@ -86,7 +85,7 @@ impl Webnis {
         };
 
         // get username/password from POST body
-        let authinfo = match AuthInfo::from_post_body(&body) {
+        let authinfo = match AuthInfo::from_post_body(&body, is_json) {
             None => return json_error(StatusCode::BAD_REQUEST, None, "Body parameters missing"),
             Some(ai) => ai,
         };
@@ -101,9 +100,10 @@ impl Webnis {
         if let Some(ref lua_func) = auth.lua_function {
             let lauth = lua::AuthInfo{
                 username:       authinfo.username,
-                pct_password:   lua::bytes_to_string(&authinfo.password),
+                password:       authinfo.password,
                 map:            auth.map.clone(),
                 key:            auth.key.clone(),
+                extra:          authinfo.extra,
             };
             let res = match lua::lua_auth(lua_func, &domain.name, lauth) {
                 Ok(serde_json::Value::Null) => json_error(StatusCode::FORBIDDEN, Some(StatusCode::UNAUTHORIZED), "Password incorrect"),
@@ -126,7 +126,7 @@ impl Webnis {
     /// Authenticate using a map. We find the map, lookup the keyname/keyval (usually username).
     /// Then if we found an entry, it is a map, and it has a "passwd" member, check the
     /// provided password against the password in the map.
-    fn auth_map(&self, dom: &config::Domain, map: &str, key: &str, username: &str, passwd: &[u8]) -> Result<bool, WnError> {
+    fn auth_map(&self, dom: &config::Domain, map: &str, key: &str, username: &str, passwd: &str) -> Result<bool, WnError> {
 
         let (map, keyname) = match self.inner.config.find_map(map, key) {
             None => {
@@ -156,13 +156,13 @@ impl Webnis {
         // extract password and auth.
         let res = match json.get("passwd").map(|p| p.as_str()).unwrap_or(None) {
             None => false,
-            Some(p) => pwhash::unix::verify(passwd, p),
+            Some(hash) => check_unix_password(passwd, hash),
         };
         Ok(res)
     }
 
     /// This basically is the lua map_auth() function.
-    pub fn lua_map_auth(&self, domain: &str, map: &str, key: &str, username: &str, passwd: &[u8]) -> Result<bool, WnError> {
+    pub fn lua_map_auth(&self, domain: &str, map: &str, key: &str, username: &str, passwd: &str) -> Result<bool, WnError> {
 
         // lookup domain in config
         let domain = match self.inner.config.find_domain(&domain) {
@@ -257,6 +257,7 @@ impl Webnis {
 
     fn lookup_lua_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
         match lua::lua_map(&map.lua_function.as_ref().unwrap(), &dom.name, keyname, keyval) {
+            Ok(serde_json::Value::Null) => Err(WnError::KeyNotFound),
             Ok(m) => Ok(m),
             Err(_) => Err(WnError::Other),
         }
