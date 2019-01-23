@@ -2,7 +2,7 @@ use std::net::IpAddr;
 use std::cmp::Ordering::{self,Less,Equal,Greater};
 use std::collections::HashSet;
 
-use ipnet::{IpNet,Ipv4Net,Ipv6Net,Contains};
+use ipnet::{IpNet,Ipv4Net,Ipv6Net};
 
 /// A list of IP subnets. Only used to answer the question
 /// "does the list contain this IpAddr", e.g. for access control.
