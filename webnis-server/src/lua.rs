@@ -1,4 +1,3 @@
-
 use std::sync::Mutex;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -11,7 +10,7 @@ use serde_json::Value as JValue;
 //use rlua::{Function, Lua, MetaMethod, Result, UserData, UserDataMethods, Variadic};
 use rlua::{self, Function, Lua, ToLua, MetaMethod, UserData, UserDataMethods};
 
-use crate::{Webnis, util};
+use crate::{webnis::Webnis, util};
 use crate::errors::*;
 
 // main info that interpreter instances use to initialize.

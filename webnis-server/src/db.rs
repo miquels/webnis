@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use serde_json;
 use gdbm;
 
-use errors::*;
+use crate::errors::*;
 
 struct GdbmDb {
     #[allow(unused)]

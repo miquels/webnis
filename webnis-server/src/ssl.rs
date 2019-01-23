@@ -4,8 +4,8 @@ use std::process::exit;
 use openssl::ssl;
 use openssl::ssl::{SslAcceptorBuilder, SslAcceptor, SslFiletype, SslMethod, SslOptions, SslSessionCacheMode};
 
-use super::PROGNAME;
-use super::config::Config;
+use crate::PROGNAME;
+use crate::config::Config;
 
 /// load ssl keys
 pub fn acceptor(keyfile: &str, chainfile: &str) -> io::Result<SslAcceptorBuilder> {

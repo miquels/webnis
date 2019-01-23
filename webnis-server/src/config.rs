@@ -1,5 +1,4 @@
 
-use std;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
@@ -7,7 +6,8 @@ use std::net::{SocketAddr, ToSocketAddrs, IpAddr};
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
-use iplist::IpList;
+use crate::iplist::IpList;
+
 use ipnet::{Ipv4Net,Ipv6Net,IpNet};
 use toml;
 

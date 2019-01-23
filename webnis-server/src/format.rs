@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde_json;
 use serde;
 
-use errors::*;
+use crate::errors::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct Passwd<'a> {

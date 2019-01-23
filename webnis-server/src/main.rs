@@ -4,28 +4,10 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate serde_json;
-extern crate actix;
-extern crate actix_web;
-extern crate base64;
-extern crate env_logger;
-extern crate failure;
-extern crate futures;
-extern crate gdbm;
-extern crate http;
-extern crate ipnet;
-extern crate libc;
-extern crate net2;
-extern crate openssl;
-extern crate percent_encoding;
-extern crate pwhash;
-extern crate rlua;
-extern crate serde;
-extern crate toml;
 
+#[macro_use] pub(crate) mod errors;
 pub(crate) mod config;
 pub(crate) mod db;
-#[macro_use]
-pub(crate) mod errors;
 pub(crate) mod format;
 pub(crate) mod iplist;
 pub(crate) mod lua;
@@ -37,6 +19,15 @@ use std::net::{SocketAddr,ToSocketAddrs,IpAddr};
 use std::process::exit;
 use std::str::FromStr;
 
+use  actix;
+use  actix_web;
+use  env_logger;
+use  failure;
+use  futures;
+use  http;
+use  libc;
+use  net2;
+
 use actix_web::{
     server, pred,
     App, AsyncResponder,
@@ -45,11 +36,10 @@ use actix_web::{
     http::StatusCode,
 };
 use futures::{future,Future};
-use iplist::IpList;
 
-use util::*;
-
-use webnis::Webnis;
+use crate::iplist::IpList;
+use crate::util::*;
+use crate::webnis::Webnis;
 
 static PROGNAME: &'static str = "webnis-server";
 
