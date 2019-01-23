@@ -48,7 +48,7 @@ fn local_lua_init() -> Option<LuaState> {
         },
     };
     let lua = Lua::new();
-    if let Err(e) = lua.exec::<()>(&lua_master.script, Some(lua_master.name.as_str())) {
+    if let Err::<(), _>(e) = lua.exec(&lua_master.script, Some(lua_master.name.as_str())) {
         panic!("error loading lua script {}: {}", lua_master.name, e);
     }
 
@@ -66,7 +66,7 @@ pub(crate) fn lua_init(name: &str, webnis: Webnis) -> Result<(), Error> {
     let mut guard = LUA_MASTER.lock().unwrap();
     let script = std::fs::read_to_string(name).context(format!("opening {}", name))?;
     let lua = Lua::new();
-    if let Err(e) = lua.exec::<()>(&script, Some(name)) {
+    if let Err::<(), _>(e) = lua.exec(&script, Some(name)) {
         merror!("parsing lua script:\n{}", e);
         Err(WnError::LuaError)?;
     }
@@ -194,7 +194,7 @@ pub struct AuthInfo {
 }
 
 impl UserData for AuthInfo {
-    fn add_methods(methods: &mut UserDataMethods<Self>) {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_meta_method(MetaMethod::Index, |lua, this: &AuthInfo, arg: String| {
             match arg.as_str() {
                 "username"  => this.username.clone().to_lua(lua).map(|x| Some(x)),
