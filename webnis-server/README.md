@@ -21,7 +21,7 @@ what format the source map is in.
 The request to the webnis server is a simple HTTPS request, like:
 
 ```
-GET /webnis/passwd?name=mikevs
+GET /webnis/my.domain/map/passwd?name=mikevs
 HTTP/1.1 200 OK
 Content-Type: application/json
 
@@ -42,5 +42,25 @@ POST <BASE>/<DOMAIN>/auth
 ```
 
 For auth you need to send a `x-www-form-urlencoded` body with
-`username` and `password` parameters.
+`username` and `password` parameters, example:
+
+```
+POST /webnis/my.domain/auth
+Content-Length: 35
+Content-Type: application/x-www-form-urlencoded
+
+username=testuser&password=testpass
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"result":{"some_json":true}}
+```
+
+You can also send a JSON object with `username` and `password` parameters.
+You need to set `Content-Type: application/json` header for that.
+
+Advantage of x-www-form-urlencoded is that the password does not _have_
+to be in UTF-8 encoding, it is handled as a stream of bytes, which can be
+useful in legacy environments.
 
