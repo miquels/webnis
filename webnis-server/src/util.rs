@@ -79,7 +79,7 @@ pub fn decode_post_body(body: &[u8]) -> HashMap<String, String> {
             let v = match k.as_ref() {
                 "password" => std::str::from_utf8(v).map(|s| s.to_string()),
                 "password_raw" => continue,
-                x => percent_decode(x.as_bytes()).decode_utf8().map(|x| x.into_owned()),
+                _ => percent_decode(v).decode_utf8().map(|x| x.into_owned()),
             };
             if let Ok(v) = v {
                 hm.insert(k.into_owned(), v);
