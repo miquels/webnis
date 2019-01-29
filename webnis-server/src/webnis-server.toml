@@ -16,8 +16,8 @@
 #   sent in the request body.
 # - find the [[domain]] from the client's request URL
 # - the domain has a authorization password. check it.
-# - the domain has an "auth_map" key, it points to an "auth" section
-#   e.g. auth_map = "xs4all" -> [auth.xs4all].
+# - the domain has an "auth" key, it points to an "auth" section
+#   e.g. auth = "xs4all" -> [auth.xs4all].
 # - the auth section tells the server what map to use, and the key
 #   to use for the username lookup.
 # - if an entry is found, and it has a "passwd" field with an encrypted
@@ -65,60 +65,52 @@
   # key to use
   key = "name"
 
-# password map. note that the section name consists of three
-# parts, separated by dots map. <MAPNAME> . <some identifier>
-# if you need the MAPNAME to contain a dot, use double quotes.
+# The "passwd" map. This map is equivalent to the system's /etc/passwd.
 #
-# this entry is matched when the map name is "passwd", and the
-# lookup key is "name" (or "user", since we defined a key alias).
-[map.passwd.byname]
-  key = "name"
-  key_alias = { user = "name" }
-  map_format = "passwd"
-  map_type   = "gdbm"
-  map_file   = "passwd.byname"
+# Note thaht we define it in 3 parts: a base map definition, and then two
+# submaps that are used when the keyname is the same as the one from the request.
+[map.passwd]
+  type   = "gdbm"
+  format = "passwd"
 
-# this entry is matched when the map name is "passwd", and the
-# lookup key is "uid".
-[map.passwd.byuid]
-  key = "uid"
-  map_format = "passwd"
-  map_type   = "gdbm"
-  map_file = "passwd.byuid"
+  # this entry is matched when the lookup key is "name" (or "user",
+  # since we defined a key alias).
+  [map.passwd.byname]
+    key_alias = { user = "name" }
+    file      = "passwd.byname"
+
+  # this entry is matched when the lookup key is "uid".
+  [map.passwd.byuid]
+    file = "passwd.byuid"
 
 # this section is (as we have configured it here) not available for lookups
 # directly, but the [auth.adjunct] section refers to it.
-[map.adjunct]
-  key = "name"
-  map_format = "adjunct"
-  map_type   = "gdbm"
-  map_file = "passwd.adjunct.byname"
+[map.adjunct.name]
+  type   = "gdbm"
+  format = "adjunct"
+  file   = "passwd.adjunct.byname"
 
 # The maptype here is "json", which means that the file contains
 # a JSON array, and each array element contains a group object.
 # The objects can be looked up by "name" and "gid".
 [map.group]
   keys = [ "name", "gid" ]
-  map_type = "json"
-  map_file = "group"
+  type = "json"
+  file = "group"
 
 # This is a Linux specific maptype, used by the glibc NSS implementation.
 # It is used to find all the groups that a user is a member of. Rather
 # than scanning the entire "group" map, we have a direct
 # username -> grouplist map.
-[map.gidlist]
-  [map.gidlist.json]
-  key = "name"
-  map_type = "json"
-  map_file = "gidlist"
+[map.gidlist.name]
+  type = "json"
+  file = "gidlist"
 
 # When a lookup is done in this map, the LUA function "map_example"
 # is called, which is defined in the "business-logic.lua" script.
-[map.lua_example]
-  # key is just your regular key
-  key = "user"
+[map.lua_example.user]
   # type is lua, means it's a function we call
-  map_type   = "lua"
+  type   = "lua"
   # and this is the name of the function
   lua_function = "map_example"
 

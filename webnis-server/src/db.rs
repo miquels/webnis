@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use std::cell::RefCell;
 use std::fs::{self,File};
 use std::time::SystemTime;
+use std::str::FromStr;
 
+use serde::{self, Deserialize, Deserializer};
 use serde_json;
 use gdbm;
 
@@ -91,5 +93,41 @@ pub fn json_lookup(db_path: impl AsRef<str>, keyname: &str, keyval: &str) -> Res
         idx += 1;
     }
     Err(WnError::KeyNotFound)
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub enum MapType {
+    Gdbm,
+    Json,
+    Lua,
+    None,
+}
+
+impl FromStr for MapType {
+    type Err = WnError;
+
+    fn from_str(s: &str) -> Result<MapType, WnError> {
+        let f = match s {
+            "gdbm"  => MapType::Gdbm,
+            "json"  => MapType::Json,
+            "lua"   => MapType::Lua,
+            _       => return Err(WnError::UnknownMapType),
+        };
+        Ok(f)
+    }
+}
+
+// Serde helper
+pub fn deserialize_map_type<'de, D>(deserializer: D) -> Result<MapType, D::Error>
+    where D: Deserializer<'de>
+{
+    let s = String::deserialize(deserializer)?;
+    MapType::from_str(&s).map_err(serde::de::Error::custom)
+}
+
+impl Default for MapType {
+    fn default() -> MapType {
+        MapType::None
+    }
 }
 

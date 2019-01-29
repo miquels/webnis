@@ -5,6 +5,7 @@ use actix_web::HttpResponse;
 use actix_web::http::StatusCode;
 use serde_json;
 
+use crate::db::MapType;
 use crate::iplist::IpList;
 use crate::errors::WnError;
 use crate::util::*;
@@ -148,11 +149,11 @@ impl Webnis {
         };
 
         // see what type of map this is and delegate to the right lookup function.
-        let res = match map.map_type.as_str() {
-            "gdbm" => self.lookup_gdbm_map(dom, map, username),
-            "json" => self.lookup_json_map(dom, map, keyname, username),
+        let res = match map.map_type {
+            MapType::Gdbm => self.lookup_gdbm_map(dom, map, username),
+            MapType::Json => self.lookup_json_map(dom, map, keyname, username),
             _ => {
-                warn!("auth_map: map {}: unsupported {}", map.name, map.map_type);
+                warn!("auth_map: map {}: unsupported {:?}", map.name, map.map_type);
                 return Err(WnError::DbOther);
             },
         };
@@ -205,11 +206,11 @@ impl Webnis {
             Some(m) => m,
         };
 
-        let res = match map.map_type.as_str() {
-            "gdbm" => self.lookup_gdbm_map(domain, map, keyval),
-            "json" => self.lookup_json_map(domain, map, keyname, keyval),
-            "lua" => self.lookup_lua_map(domain, map, keyname, keyval),
-            _ => return json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Unsupported database format"),
+        let res = match map.map_type {
+            MapType::Gdbm => self.lookup_gdbm_map(domain, map, keyval),
+            MapType::Json => self.lookup_json_map(domain, map, keyname, keyval),
+            MapType::Lua  => self.lookup_lua_map(domain, map, keyname, keyval),
+            MapType::None => unreachable!(),
         };
         match res {
             Err(WnError::KeyNotFound) => json_error(StatusCode::NOT_FOUND, None, "No such key in map"),
@@ -233,14 +234,14 @@ impl Webnis {
 
         // find the map 
         let (map, keyname) = match self.inner.config.find_map(mapname, keyname) {
-            None => return Err(WnError::DbOther),
+            None => return Err(WnError::MapNotFound),
             Some(m) => m,
         };
 
         // do lookup
-        let res = match map.map_type.as_str() {
-            "gdbm" => self.lookup_gdbm_map(domain, map, keyval),
-            "json" => self.lookup_json_map(domain, map, keyname, keyval),
+        let res = match map.map_type {
+            MapType::Gdbm => self.lookup_gdbm_map(domain, map, keyval),
+            MapType::Json => self.lookup_json_map(domain, map, keyname, keyval),
             _ => Err(WnError::Other),
         };
 
@@ -258,7 +259,7 @@ impl Webnis {
         };
         let path = format!("{}/{}", dom.db_dir, map.map_file.as_ref().unwrap());
         let line = db::gdbm_lookup(&path, keyval)?;
-        format::line_to_json(&line, &format, &map.map_args)
+        format::line_to_json(&line, format, &map.map_args)
     }
 
     fn lookup_json_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {

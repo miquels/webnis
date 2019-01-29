@@ -19,6 +19,8 @@ pub enum WnError {
     DeserializeData,
     #[fail(display = "Unknown format")]
     UnknownFormat,
+    #[fail(display = "Unknown map type")]
+    UnknownMapType,
     #[fail(display = "Failed to execute script function")]
     LuaError,
     #[fail(display = "Script function not found")]
