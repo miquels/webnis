@@ -105,8 +105,20 @@ impl Webnis {
                 extra:          authinfo.extra,
             };
             let res = match lua::lua_auth(lua_func, &domain.name, lauth) {
-                Ok(serde_json::Value::Null) => json_error(StatusCode::FORBIDDEN, Some(StatusCode::UNAUTHORIZED), "Password incorrect"),
-                Ok(v) => json_result(StatusCode::OK, &v),
+                Ok((serde_json::Value::Null, status)) => {
+                    if status == 0 {
+                        json_error(StatusCode::FORBIDDEN, Some(StatusCode::UNAUTHORIZED), "Password incorrect")
+                    } else {
+                        json_error(StatusCode::from_u16(status).unwrap(), Some(StatusCode::UNAUTHORIZED), "Password incorrect")
+                    }
+                },
+                Ok((val, status)) => {
+                    if status == 0 {
+                        json_result(StatusCode::OK, &val)
+                    } else {
+                        json_result_raw(StatusCode::from_u16(status).unwrap(), &val)
+                    }
+                },
                 Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Internal server error"),
             };
             return res;

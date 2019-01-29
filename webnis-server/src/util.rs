@@ -64,6 +64,15 @@ pub(crate) fn json_result(code: StatusCode, msg: &serde_json::Value) -> HttpResp
         .body(body)
 }
 
+pub(crate) fn json_result_raw(code: StatusCode, raw: &serde_json::Value) -> HttpResponse {
+    let body = json!(raw);
+    let body = body.to_string() + "\n";
+
+    HttpResponse::build(code)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(body)
+}
+
 /// decode POST body into simple key/value.
 ///
 /// Now wouldn't it be great if we could use serde_urlencoded! Unfortunately

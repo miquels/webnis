@@ -218,7 +218,7 @@ impl UserData for AuthInfo {
 
 /// lua_auth calls a lua function.
 /// returns a json value on success, json null on auth fail, error on any errors.
-pub(crate) fn lua_auth(funcname: &str, domain: &str, ai: AuthInfo) -> Result<serde_json::Value, WnError> {
+pub(crate) fn lua_auth(funcname: &str, domain: &str, ai: AuthInfo) -> Result<(serde_json::Value, u16), WnError> {
 
     LUA.with(|lua_tls| {
         let lua_state1 = &*lua_tls.borrow();
@@ -239,16 +239,39 @@ pub(crate) fn lua_auth(funcname: &str, domain: &str, ai: AuthInfo) -> Result<ser
             Err(_e) => return Err(WnError::LuaFunctionNotFound),
         };
 
-        let val = match func.call::<_, rlua::Value>(ai) {
+        // function can return 0, 1 or 2 values.
+        let multival = match func.call::<_, rlua::MultiValue>(ai) {
             Ok(v) => v,
             Err(e) => {
                 merror!("lua_auth: executing {}:\n{}", funcname, e);
                 return Err(WnError::LuaError);
             },
         };
+        let mut vals = multival.into_iter();
 
-        let jv = lua_value_to_json(val);
-        Ok(jv)
+        // first value, if present, is the returned table.
+        let jv = vals.next().map(|v| lua_value_to_json(v)).unwrap_or(serde_json::Value::Null);
+
+        // second value, if present, is statuscode.
+        let code = {
+            match vals.next() {
+                Some(rlua::Value::Integer(n)) => {
+                    if n < 100 || n > 599 {
+                        merror!("lua_auth: executing {}: status code out of range: {}\n",
+                                funcname, n);
+                        return Err(WnError::LuaError);
+                    }
+                    n as u16
+                },
+                Some(_) => {
+                        merror!("lua_auth: executing {}: status code not an integer\n", funcname);
+                        return Err(WnError::LuaError)
+                },
+                None => 0,
+            }
+        };
+
+        Ok((jv, code))
     })
 }
 
