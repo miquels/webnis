@@ -1,11 +1,18 @@
-#[macro_use] extern crate clap;
-#[macro_use] extern crate failure_derive;
-#[macro_use] extern crate lazy_static;
-#[macro_use] extern crate log;
-#[macro_use] extern crate serde_derive;
-#[macro_use] extern crate serde_json;
+#[macro_use]
+extern crate clap;
+#[macro_use]
+extern crate failure_derive;
+#[macro_use]
+extern crate lazy_static;
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate serde_derive;
+#[macro_use]
+extern crate serde_json;
 
-#[macro_use] pub(crate) mod errors;
+#[macro_use]
+pub(crate) mod errors;
 pub(crate) mod config;
 pub(crate) mod db;
 pub(crate) mod format;
@@ -15,27 +22,24 @@ pub(crate) mod ssl;
 pub(crate) mod util;
 pub(crate) mod webnis;
 
-use std::net::{SocketAddr,ToSocketAddrs,IpAddr};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::process::exit;
 use std::str::FromStr;
 
-use  actix;
-use  actix_web;
-use  env_logger;
-use  failure;
-use  futures;
-use  http;
-use  libc;
-use  net2;
+use actix;
+use actix_web;
+use env_logger;
+use failure;
+use futures;
+use http;
+use libc;
+use net2;
 
 use actix_web::{
-    server, pred,
-    App, AsyncResponder,
-    HttpRequest, HttpResponse, HttpMessage,
-    FromRequest, Path,
-    http::StatusCode,
+    http::StatusCode, pred, server, App, AsyncResponder, FromRequest, HttpMessage, HttpRequest, HttpResponse,
+    Path,
 };
-use futures::{future,Future};
+use futures::{future, Future};
 
 use crate::iplist::IpList;
 use crate::util::*;
@@ -44,24 +48,24 @@ use crate::webnis::Webnis;
 static PROGNAME: &'static str = "webnis-server";
 
 const CT: &'static str = "content-type";
-const X_WWW_FORM: &'static str= "application/x-www-form-urlencoded";
-const APPL_JSON: &'static str= "application/json";
+const X_WWW_FORM: &'static str = "application/x-www-form-urlencoded";
+const APPL_JSON: &'static str = "application/json";
 
 fn main() {
-
     env_logger::init();
 
     let matches = clap_app!(webnis_server =>
         (version: "0.1")
         (@arg CFG: -c --config +takes_value "configuration file (/etc/webnis-server.toml)")
-    ).get_matches();
+    )
+    .get_matches();
     let cfg = matches.value_of("CFG").unwrap_or("/etc/webnis-server.toml");
 
     let config = match config::read(cfg) {
         Err(e) => {
             eprintln!("{}: {}: {}", PROGNAME, cfg, e);
             exit(1);
-        }
+        },
         Ok(c) => c,
     };
     if config.domain.len() == 0 {
@@ -71,7 +75,7 @@ fn main() {
 
     // read /etc/ypserv.securenets if configured.
     let securenets = if config.server.securenets.len() > 0 {
-        let mut iplist =  IpList::new();
+        let mut iplist = IpList::new();
         for file in &config.server.securenets {
             if let Err(e) = config::read_securenets(&file, &mut iplist) {
                 eprintln!("{}: {}: {}", PROGNAME, file, e);
@@ -85,7 +89,7 @@ fn main() {
 
     // arbitrary limit, really.
     raise_rlimit_nofile(64000);
-    
+
     // initialize webnis stuff
     let webnis = Webnis::new(config.clone(), securenets);
 
@@ -100,31 +104,33 @@ fn main() {
     let sys = actix::System::new("webnis");
 
     let app_factory = move |prefix, webnis| {
-            App::with_state(webnis)
-                .prefix(prefix)
-                .resource("/{domain}/map/{map}", |r| {
-                    r.method(http::Method::GET).f(handle_map);
-                    r.route()
-                        .filter(pred::Not(pred::Get()))
-                        .f(|_| HttpResponse::MethodNotAllowed());
-                })
-                .resource("/{domain}/auth", move |r| {
-                    r.method(http::Method::POST)
-                        .filter(pred::Any(pred::Header(CT, X_WWW_FORM)).or(pred::Header(CT, APPL_JSON)))
-                        .f(handle_auth);
-                    r.method(http::Method::POST)
-                        .filter(pred::Not(pred::Any(pred::Header(CT, X_WWW_FORM)).or(pred::Header(CT, APPL_JSON))))
-                        .f(|_| HttpResponse::UnsupportedMediaType());
-                    r.route()
-                        .filter(pred::Not(pred::Post()))
-                        .f(|_| HttpResponse::MethodNotAllowed());
-                })
-                .resource("/{domain}/info", |r| {
-                    r.method(http::Method::GET).f(handle_info);
-                    r.route()
-                        .filter(pred::Not(pred::Get()))
-                        .f(|_| HttpResponse::MethodNotAllowed());
-                })
+        App::with_state(webnis)
+            .prefix(prefix)
+            .resource("/{domain}/map/{map}", |r| {
+                r.method(http::Method::GET).f(handle_map);
+                r.route()
+                    .filter(pred::Not(pred::Get()))
+                    .f(|_| HttpResponse::MethodNotAllowed());
+            })
+            .resource("/{domain}/auth", move |r| {
+                r.method(http::Method::POST)
+                    .filter(pred::Any(pred::Header(CT, X_WWW_FORM)).or(pred::Header(CT, APPL_JSON)))
+                    .f(handle_auth);
+                r.method(http::Method::POST)
+                    .filter(pred::Not(
+                        pred::Any(pred::Header(CT, X_WWW_FORM)).or(pred::Header(CT, APPL_JSON)),
+                    ))
+                    .f(|_| HttpResponse::UnsupportedMediaType());
+                r.route()
+                    .filter(pred::Not(pred::Post()))
+                    .f(|_| HttpResponse::MethodNotAllowed());
+            })
+            .resource("/{domain}/info", |r| {
+                r.method(http::Method::GET).f(handle_info);
+                r.route()
+                    .filter(pred::Not(pred::Get()))
+                    .f(|_| HttpResponse::MethodNotAllowed());
+            })
     };
 
     let mut server = server::new(move || {
@@ -136,7 +142,7 @@ fn main() {
         ]
     });
 
-	for sockaddr in config.server.listen.to_socket_addrs().unwrap() {
+    for sockaddr in config.server.listen.to_socket_addrs().unwrap() {
         let listener = match make_listener(&sockaddr) {
             Ok(s) => s,
             Err(e) => {
@@ -195,8 +201,9 @@ fn check_authorization(req: &HttpRequest<Webnis>, domain: &str) -> Option<HttpRe
         Some(d) => d,
     };
     match check_http_auth(req.headers(), domdef) {
-        AuthResult::NoAuth |
-        AuthResult::BadAuth => Some(http_unauthorized(&domdef.name, domdef.http_authschema.as_ref())),
+        AuthResult::NoAuth | AuthResult::BadAuth => {
+            Some(http_unauthorized(&domdef.name, domdef.http_authschema.as_ref()))
+        },
         AuthResult::AuthOk => None,
     }
 }
@@ -223,9 +230,13 @@ fn handle_info(req: &HttpRequest<Webnis>) -> HttpResponse {
     req.state().handle_info(&domain)
 }
 
-fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item=HttpResponse, Error=actix_web::Error>> {
+fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item = HttpResponse, Error = actix_web::Error>> {
     let domain = match Path::<String>::extract(req) {
-        Err(_) => return Box::new(future::ok(HttpResponse::InternalServerError().body("handle_auth should not fail\n"))),
+        Err(_) => {
+            return Box::new(future::ok(
+                HttpResponse::InternalServerError().body("handle_auth should not fail\n"),
+            ));
+        },
         Ok(d) => d,
     };
     if let Some(denied) = check_authorization(req, &domain) {
@@ -242,9 +253,7 @@ fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item=HttpResponse, Error
     req.body()
         .limit(1024)
         .from_err()
-        .and_then(move |data| {
-            future::ok(webnis.handle_auth(domain, is_json, data.to_vec()).into())
-        })
+        .and_then(move |data| future::ok(webnis.handle_auth(domain, is_json, data.to_vec()).into()))
         .responder()
 }
 
@@ -265,7 +274,10 @@ fn make_listener(addr: &SocketAddr) -> std::io::Result<std::net::TcpListener> {
 
 fn raise_rlimit_nofile(want_lim: libc::rlim_t) {
     // get current rlimit.
-    let mut rlim = libc::rlimit{ rlim_cur: 0, rlim_max: 0 };
+    let mut rlim = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
     if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim as *mut libc::rlimit) } != 0 {
         return;
     }
@@ -279,9 +291,12 @@ fn raise_rlimit_nofile(want_lim: libc::rlim_t) {
     // first try raising the soft limit as far as we can or need.
     if rlim.rlim_cur < rlim.rlim_max {
         let lim = std::cmp::min(want_lim, rlim.rlim_max);
-        let new_rlim = libc::rlimit{ rlim_cur: lim, rlim_max: rlim.rlim_max };
+        let new_rlim = libc::rlimit {
+            rlim_cur: lim,
+            rlim_max: rlim.rlim_max,
+        };
         if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &new_rlim as *const libc::rlimit) } != 0 {
-                return
+            return;
         }
         if lim >= want_lim {
             return;
@@ -289,7 +304,9 @@ fn raise_rlimit_nofile(want_lim: libc::rlim_t) {
     }
 
     // still not enough? try upping the hard limit.
-    let new_rlim = libc::rlimit{ rlim_cur: want_lim, rlim_max: want_lim };
+    let new_rlim = libc::rlimit {
+        rlim_cur: want_lim,
+        rlim_max: want_lim,
+    };
     unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &new_rlim as *const libc::rlimit) };
 }
-

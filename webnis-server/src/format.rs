@@ -1,21 +1,21 @@
+use regex::Regex;
 use std::collections::HashMap;
 use std::str::FromStr;
-use regex::Regex;
 
-use serde_json;
 use serde::{self, Deserialize, Deserializer};
+use serde_json;
 
 use crate::errors::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct Passwd<'a> {
-    pub name:       &'a str,
-    pub passwd:     &'a str,
-    pub uid:        u32,
-    pub gid:        u32,
-    pub gecos:      &'a str,
-    pub dir:        &'a str,
-    pub shell:      &'a str,
+    pub name:   &'a str,
+    pub passwd: &'a str,
+    pub uid:    u32,
+    pub gid:    u32,
+    pub gecos:  &'a str,
+    pub dir:    &'a str,
+    pub shell:  &'a str,
 }
 
 impl<'a> Passwd<'a> {
@@ -24,7 +24,7 @@ impl<'a> Passwd<'a> {
         if fields.len() != 7 {
             return Err(WnError::DeserializeData);
         }
-        let p = Passwd{
+        let p = Passwd {
             name:   fields[0],
             passwd: fields[1],
             uid:    fields[2].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
@@ -39,8 +39,8 @@ impl<'a> Passwd<'a> {
 
 #[derive(Serialize, Deserialize)]
 pub struct Adjunct<'a> {
-    pub name:       &'a str,
-    pub passwd:     &'a str,
+    pub name:   &'a str,
+    pub passwd: &'a str,
 }
 
 impl<'a> Adjunct<'a> {
@@ -49,7 +49,7 @@ impl<'a> Adjunct<'a> {
         if fields.len() < 2 {
             return Err(WnError::DeserializeData);
         }
-        let p = Adjunct{
+        let p = Adjunct {
             name:   fields[0],
             passwd: fields[1],
         };
@@ -59,10 +59,10 @@ impl<'a> Adjunct<'a> {
 
 #[derive(Serialize, Deserialize)]
 pub struct Group<'a> {
-    pub name:       &'a str,
-    pub passwd:     &'a str,
-    pub gid:        u32,
-    pub mem:        Vec<&'a str>,
+    pub name:   &'a str,
+    pub passwd: &'a str,
+    pub gid:    u32,
+    pub mem:    Vec<&'a str>,
 }
 
 impl<'a> Group<'a> {
@@ -71,11 +71,11 @@ impl<'a> Group<'a> {
         if fields.len() != 4 {
             return Err(WnError::DeserializeData);
         }
-        let g = Group{
-            name:       fields[0],
-            passwd:     fields[1],
-            gid:        fields[2].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
-            mem:        fields[3].split(',').collect::<Vec<_>>(),
+        let g = Group {
+            name:   fields[0],
+            passwd: fields[1],
+            gid:    fields[2].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
+            mem:    fields[3].split(',').collect::<Vec<_>>(),
         };
         Ok(g)
     }
@@ -104,7 +104,11 @@ impl<'a> NumOrText<'a> {
 pub struct KeyValue<'a>(HashMap<&'a str, NumOrText<'a>>);
 
 impl<'a> KeyValue<'a> {
-    pub fn from_line(line: &'a str, output: &'a Option<HashMap<String, String>>) -> Result<KeyValue<'a>, WnError> {
+    pub fn from_line(
+        line: &'a str,
+        output: &'a Option<HashMap<String, String>>,
+    ) -> Result<KeyValue<'a>, WnError>
+    {
         // first split on whitespace, which gives us a bunch of
         // key=value items. Then split those on '=' and put them
         // into a HashMap.
@@ -132,13 +136,12 @@ impl<'a> KeyValue<'a> {
 
         // apply output format. result goes into "res".
         for (k, v) in output.as_ref().unwrap().iter() {
-
             // interpolate 'v'. so replace {field} with the corresponding field.
             let nv = if let Some(caps) = RE.captures(v) {
                 if let Some(val) = hm.remove(&caps[1]) {
                     val
                 } else {
-                    continue
+                    continue;
                 }
             } else {
                 NumOrText::Text(v.as_str())
@@ -155,8 +158,12 @@ pub struct Fields;
 impl Fields {
     // This could be a free-standing function. It's defined as Fields::from_line() only
     // to have parity with the other from_line methods.
-    pub fn from_line<'a>(line: &'a str, output: &'a Option<HashMap<String, String>>, separator: &str) -> Result<HashMap<NumOrText<'a>, NumOrText<'a>>, WnError> {
-
+    pub fn from_line<'a>(
+        line: &'a str,
+        output: &'a Option<HashMap<String, String>>,
+        separator: &str,
+    ) -> Result<HashMap<NumOrText<'a>, NumOrText<'a>>, WnError>
+    {
         // split line into parts.
         let separator = separator.chars().nth(0).unwrap_or('\0');
         let fields = if separator == '\0' {
@@ -168,9 +175,11 @@ impl Fields {
         // no output mapping, return hashmap keyed by the index number, starting at 1.
         // { 1 => "name", 2 => "passwd", 3 => uid, ... }
         if output.is_none() {
-            let res = fields.into_iter().enumerate()
-                        .map(|(num, val)| (NumOrText::Number((num + 1) as i64), NumOrText::parse(val)))
-                        .collect::<HashMap<_, _>>();
+            let res = fields
+                .into_iter()
+                .enumerate()
+                .map(|(num, val)| (NumOrText::Number((num + 1) as i64), NumOrText::parse(val)))
+                .collect::<HashMap<_, _>>();
             return Ok(res);
         }
 
@@ -224,16 +233,16 @@ impl FromStr for Format {
 
     fn from_str(s: &str) -> Result<Format, WnError> {
         let f = match s {
-            "passwd"                => Format::Passwd,
-            "group"                 => Format::Group,
-            "adjunct"               => Format::Adjunct,
-            "key-value"             => Format::KeyValue,
-            "colon-separated"       => Format::ColSep,
-            "whitespace-separated"  => Format::WsSep,
-            "tab-separated"         => Format::TabSep,
-            "line"                  => Format::Line,
-            "json"                  => Format::Json,
-            _                       => return Err(WnError::UnknownFormat),
+            "passwd" => Format::Passwd,
+            "group" => Format::Group,
+            "adjunct" => Format::Adjunct,
+            "key-value" => Format::KeyValue,
+            "colon-separated" => Format::ColSep,
+            "whitespace-separated" => Format::WsSep,
+            "tab-separated" => Format::TabSep,
+            "line" => Format::Line,
+            "json" => Format::Json,
+            _ => return Err(WnError::UnknownFormat),
         };
         Ok(f)
     }
@@ -241,23 +250,28 @@ impl FromStr for Format {
 
 // Serde helper
 pub fn option_deserialize_format<'de, D>(deserializer: D) -> Result<Option<Format>, D::Error>
-    where D: Deserializer<'de>
-{
+where D: Deserializer<'de> {
     let s = String::deserialize(deserializer)?;
-    Format::from_str(&s).map(|f| Some(f)).map_err(serde::de::Error::custom)
+    Format::from_str(&s)
+        .map(|f| Some(f))
+        .map_err(serde::de::Error::custom)
 }
 
-pub fn line_to_json(line: &str, format: &Format, output: &Option<HashMap<String, String>>) -> Result<serde_json::Value, WnError> {
+pub fn line_to_json(
+    line: &str,
+    format: &Format,
+    output: &Option<HashMap<String, String>>,
+) -> Result<serde_json::Value, WnError>
+{
     match format {
-        Format::Passwd      => to_json(&Passwd::from_line(line)?),
-        Format::Group       => to_json(&Group::from_line(line)?),
-        Format::Adjunct     => to_json(&Adjunct::from_line(line)?),
-        Format::KeyValue    => to_json(&KeyValue::from_line(line, output)?),
-        Format::ColSep      => to_json(&Fields::from_line(line, output, ":")?),
-        Format::WsSep       => to_json(&Fields::from_line(line, output, "")?),
-        Format::TabSep      => to_json(&Fields::from_line(line, output, "\t")?),
-        Format::Line        => to_json(&Fields::from_line(line, output, "\n")?),
-        Format::Json        => serde_json::from_str(line).map_err(WnError::SerializeJson),
+        Format::Passwd => to_json(&Passwd::from_line(line)?),
+        Format::Group => to_json(&Group::from_line(line)?),
+        Format::Adjunct => to_json(&Adjunct::from_line(line)?),
+        Format::KeyValue => to_json(&KeyValue::from_line(line, output)?),
+        Format::ColSep => to_json(&Fields::from_line(line, output, ":")?),
+        Format::WsSep => to_json(&Fields::from_line(line, output, "")?),
+        Format::TabSep => to_json(&Fields::from_line(line, output, "\t")?),
+        Format::Line => to_json(&Fields::from_line(line, output, "\n")?),
+        Format::Json => serde_json::from_str(line).map_err(WnError::SerializeJson),
     }
 }
-

@@ -1,4 +1,3 @@
-
 use serde_json;
 
 /// re-export the generic Error struct.
@@ -45,4 +44,3 @@ macro_rules! merror {
         }
     );
 }
-

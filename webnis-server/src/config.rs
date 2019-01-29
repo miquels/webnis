@@ -1,42 +1,41 @@
-
-use std::io;
-use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use std::net::{SocketAddr, ToSocketAddrs, IpAddr};
+use std::io;
 use std::net::Ipv4Addr;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use ipnet::{Ipv4Net,Ipv6Net,IpNet};
+use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use toml;
 
-use crate::db::{MapType, deserialize_map_type};
+use crate::db::{deserialize_map_type, MapType};
+use crate::format::{option_deserialize_format, Format};
 use crate::iplist::IpList;
-use crate::format::{Format, option_deserialize_format};
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
-    pub server:     Server,
-    pub domain:     Vec<Domain>,
+    pub server: Server,
+    pub domain: Vec<Domain>,
     //#[serde(default, rename="mapdef")]
     #[serde(default)]
-    pub map:        HashMap<String, MapOrMaps>,
+    pub map: HashMap<String, MapOrMaps>,
     #[serde(skip)]
-    pub map_:       HashMap<String, Vec<Map>>,
+    pub map_: HashMap<String, Vec<Map>>,
     #[serde(default)]
-    pub auth:       HashMap<String, Auth>,
-    pub lua:        Option<LuaConfig>,
-    pub include_maps:   Option<String>,
+    pub auth: HashMap<String, Auth>,
+    pub lua: Option<LuaConfig>,
+    pub include_maps: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Server {
     #[serde(default)]
-    pub tls:            bool,
-    pub crt_file:       Option<String>,
-    pub key_file:       Option<String>,
+    pub tls: bool,
+    pub crt_file: Option<String>,
+    pub key_file: Option<String>,
     #[serde(default)]
-    pub cert_password:  String,
-    pub listen:         OneOrManyAddr,
+    pub cert_password: String,
+    pub listen: OneOrManyAddr,
     #[serde(default)]
     pub securenets: Vec<String>,
 }
@@ -44,58 +43,58 @@ pub struct Server {
 #[derive(Deserialize, Debug, Clone)]
 pub struct Domain {
     /// domain name
-    pub name:               String,
+    pub name: String,
     /// database directory
-    pub db_dir:             String,
+    pub db_dir: String,
     /// available (allowed) maps
-    pub maps:               Vec<String>,
+    pub maps: Vec<String>,
     /// link to the authentication method/map
-    pub auth:               Option<String>,
+    pub auth: Option<String>,
     /// HTTP Authentication schema (first thing in the Authorization: header)
-    pub http_authschema:    Option<String>,
+    pub http_authschema: Option<String>,
     /// HTTP Token (comes after the schema in the Authorization header).
-    pub http_authtoken:     Option<String>,
+    pub http_authtoken: Option<String>,
     /// Encoding of the authtoken. For schema 'Basic' this is usually 'base64'.
-    pub http_authencoding:  Option<String>,
+    pub http_authencoding: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Auth {
-    pub map:            Option<String>,
-    pub key:            Option<String>,
-    pub lua_function:   Option<String>,
+    pub map:          Option<String>,
+    pub key:          Option<String>,
+    pub lua_function: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Map {
     #[serde(skip, default)]
-    pub name:       String,
-    pub key:        Option<String>,
+    pub name: String,
+    pub key: Option<String>,
     #[serde(default)]
-    pub keys:       Vec<String>,
+    pub keys: Vec<String>,
     #[serde(default)]
-    pub key_alias:  HashMap<String, String>,
+    pub key_alias: HashMap<String, String>,
     /// LUA function to call.
     pub lua_function: Option<String>,
     /// type: gdbm, json, lua
     #[serde(default, rename = "type", deserialize_with = "deserialize_map_type")]
-    pub map_type:   MapType,
+    pub map_type: MapType,
     /// format: kv, json, passwd, fields (optional for map_type "json")
     #[serde(default, rename = "format", deserialize_with = "option_deserialize_format")]
     pub map_format: Option<Format>,
     /// filename
     #[serde(rename = "file")]
-    pub map_file:   Option<String>,
+    pub map_file: Option<String>,
     /// optional args for types like 'fields'
     #[serde(rename = "output")]
-    pub map_output:   Option<HashMap<String, String>>,
+    pub map_output: Option<HashMap<String, String>>,
     #[serde(flatten)]
-    pub submaps:    HashMap<String, Map>,
+    pub submaps: HashMap<String, Map>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct LuaConfig {
-    pub script:         String,
+    pub script: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -103,10 +102,10 @@ pub struct LuaConfig {
 pub enum MapOrMaps {
     Maps(HashMap<String, Map>),
     Map(Map),
-//    Other(serde_json::Value),
+    //    Other(serde_json::Value),
 }
 
-#[derive(Deserialize,Debug,Clone)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum OneOrManyAddr {
     One(SocketAddr),
@@ -126,16 +125,20 @@ impl ToSocketAddrs for OneOrManyAddr {
 
 fn map_inherit(key: &str, map: &Map, base: &Map) -> Map {
     Map {
-        name:           String::new(),
-        key:            map.key.clone().or_else(|| Some(key.to_string())),
-        keys:           map.keys.clone(),
-        key_alias:      map.key_alias.clone(),
-        lua_function:   map.lua_function.clone().or_else(|| base.lua_function.clone()),
-        map_type:       if map.map_type != MapType::None { map.map_type.clone() } else { base.map_type.clone() },
-        map_format:     map.map_format.clone().or_else(|| base.map_format.clone()),
-        map_file:       map.map_file.clone().or_else(|| base.map_file.clone()),
-        map_output:     map.map_output.clone().or_else(|| base.map_output.clone()),
-        submaps:        HashMap::new(),
+        name:         String::new(),
+        key:          map.key.clone().or_else(|| Some(key.to_string())),
+        keys:         map.keys.clone(),
+        key_alias:    map.key_alias.clone(),
+        lua_function: map.lua_function.clone().or_else(|| base.lua_function.clone()),
+        map_type:     if map.map_type != MapType::None {
+            map.map_type.clone()
+        } else {
+            base.map_type.clone()
+        },
+        map_format:   map.map_format.clone().or_else(|| base.map_format.clone()),
+        map_file:     map.map_file.clone().or_else(|| base.map_file.clone()),
+        map_output:   map.map_output.clone().or_else(|| base.map_output.clone()),
+        submaps:      HashMap::new(),
     }
 }
 
@@ -144,7 +147,7 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
     let buffer = std::fs::read_to_string(&toml_file)?;
 
     // initial parse.
-    let mut config : Config = match toml::from_str(&buffer) {
+    let mut config: Config = match toml::from_str(&buffer) {
         Ok(v) => Ok(v),
         Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
     }?;
@@ -158,10 +161,14 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
         };
         let buffer = std::fs::read_to_string(&include_maps)
             .map_err(|e| io::Error::new(e.kind(), format!("{:?}: {}", include_maps, e)))?;
-        let maps : HashMap<String, MapOrMaps> = match toml::from_str(&buffer) {
+        let maps: HashMap<String, MapOrMaps> = match toml::from_str(&buffer) {
             Ok(v) => Ok(v),
-            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData,
-                                    format!("include_maps {:?}: {}", include_maps, e))),
+            Err(e) => {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("include_maps {:?}: {}", include_maps, e),
+                ))
+            },
         }?;
         // add to main config.
         for (name, map) in maps.into_iter() {
@@ -192,8 +199,10 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
                 if m.submaps.len() > 0 {
                     // basemap with submaps.
                     if m.key.is_some() || m.keys.len() > 0 || m.key_alias.len() > 0 {
-                        return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                    format!("map {}: basemap cannot have a key", k)));
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("map {}: basemap cannot have a key", k),
+                        ));
                     }
                     for (key, submap) in m.submaps.iter() {
                         mm.push(map_inherit(key, submap, m));
@@ -220,50 +229,64 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
 
             // Map type must be set.
             if m.map_type == MapType::None {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                    format!("map {}: map_type not set", m.name)));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("map {}: map_type not set", m.name),
+                ));
             }
 
             // format = "..." only works with MapType::Gdbm at this time.
             if m.map_type != MapType::Gdbm && m.map_format.is_some() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                            format!("map {}: cannot use format with map type {:?}", m.name, m.map_type)));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("map {}: cannot use format with map type {:?}", m.name, m.map_type),
+                ));
             }
 
             if m.map_type == MapType::Lua {
                 // Type Lua, function must be set.
                 if m.lua_function.is_none() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                format!("map {}: lua_function not set", m.name)));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("map {}: lua_function not set", m.name),
+                    ));
                 }
             } else {
                 // lua_function must not be set.
                 if m.lua_function.is_some() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                format!("map {}: lua_function set, map_type must be \"lua\"", m.name)));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("map {}: lua_function set, map_type must be \"lua\"", m.name),
+                    ));
                 }
 
                 // Must have a key.
                 if m.key.is_none() && m.keys.len() == 0 {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                format!("map {}: no key", m.name)));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("map {}: no key", m.name),
+                    ));
                 }
 
                 // Must have a filename.
                 if m.map_file.is_none() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                format!("map {}: map file not set", m.name)));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("map {}: map file not set", m.name),
+                    ));
                 }
 
                 // output mapping doesn't work (yet) with all formats.
                 if m.map_output.is_some() {
                     match m.map_format {
-                        | Some(Format::Json)
-                        | Some(Format::Passwd)
-                        | Some(Format::Group)
-                        | Some(Format::Adjunct) => {
-                            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                format!("map {}: cannot use output with format {:?}", m.name, m.map_format)));
+                        Some(Format::Json) |
+                        Some(Format::Passwd) |
+                        Some(Format::Group) |
+                        Some(Format::Adjunct) => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("map {}: cannot use output with format {:?}", m.name, m.map_format),
+                            ));
                         },
                         _ => {},
                     }
@@ -277,18 +300,26 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
     for d in &config.domain {
         if let Some(ref auth_name) = d.auth {
             let auth = match config.auth.get(auth_name) {
-                None => return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                   format!("config: domain {}: auth {} not defined", d.name, auth_name))),
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("config: domain {}: auth {} not defined", d.name, auth_name),
+                    ));
+                },
                 Some(a) => a,
             };
             if auth.lua_function.is_none() {
                 if auth.key.is_none() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData,
-                           format!("config: auth {}: 'key' not set", auth_name)));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("config: auth {}: 'key' not set", auth_name),
+                    ));
                 }
                 if auth.map.is_none() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData,
-                           format!("config: auth {}: 'map' not set", auth_name)));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("config: auth {}: 'map' not set", auth_name),
+                    ));
                 }
             }
         }
@@ -297,13 +328,17 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
     // Check if TLS settings are valid.
     if config.server.tls {
         if config.server.key_file.is_none() && config.server.crt_file.is_none() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                           "config: tls enabled but no cert files configured"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "config: tls enabled but no cert files configured",
+            ));
         }
 
         if config.server.key_file.is_some() != config.server.crt_file.is_some() {
-            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                       "config: both the key_file and crt_file must be set"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "config: both the key_file and crt_file must be set",
+            ));
         }
     }
 
@@ -311,7 +346,6 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
 }
 
 impl Config {
-
     /// look up a domain by name.
     pub fn find_domain(&self, name: &str) -> Option<&Domain> {
         self.domain.iter().find(|d| d.name == name)
@@ -332,7 +366,7 @@ impl Config {
         // find first map with a matching key.
         for m in maps {
             let key = m.key_alias.get(key).map(|s| s.as_str()).unwrap_or(key);
-            let mut keys= m.key.iter().chain(m.keys.iter());
+            let mut keys = m.key.iter().chain(m.keys.iter());
             if let Some(k) = keys.find(|ref k| k.as_str() == key) {
                 return Some((m, k));
             }
@@ -341,14 +375,23 @@ impl Config {
     }
 
     /// Like find_map, but map must be in the allowed list for the domain
-    pub fn find_allowed_map<'b, 'a: 'b>(&'a self, domain: &Domain, mapname: &str, key: &'b str) -> Option<(&'a Map, &'b str)> {
-        domain.maps.iter().find(|m| m.as_str() == mapname)
+    pub fn find_allowed_map<'b, 'a: 'b>(
+        &'a self,
+        domain: &Domain,
+        mapname: &str,
+        key: &'b str,
+    ) -> Option<(&'a Map, &'b str)>
+    {
+        domain
+            .maps
+            .iter()
+            .find(|m| m.as_str() == mapname)
             .and_then(|_| self.find_map(mapname, key))
     }
 }
 
 fn masklen(mask: &Ipv4Addr) -> u8 {
-    let v : u32 = (*mask).into();
+    let v: u32 = (*mask).into();
     for i in 0..32 {
         if v & 2u32.pow(i) > 0 {
             return (32 - i) as u8;

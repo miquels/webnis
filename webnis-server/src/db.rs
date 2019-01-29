@@ -1,22 +1,22 @@
-use std::path::Path;
-use std::collections::HashMap;
 use std::cell::RefCell;
-use std::fs::{self,File};
-use std::time::SystemTime;
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::path::Path;
 use std::str::FromStr;
+use std::time::SystemTime;
 
+use gdbm;
 use serde::{self, Deserialize, Deserializer};
 use serde_json;
-use gdbm;
 
 use crate::errors::*;
 
 struct GdbmDb {
     #[allow(unused)]
-    file_name:  String,
-    modified:   Option<SystemTime>,
-    lastcheck:  SystemTime,
-    handle:     gdbm::Gdbm,
+    file_name: String,
+    modified: Option<SystemTime>,
+    lastcheck: SystemTime,
+    handle: gdbm::Gdbm,
 }
 
 // Unfortunately `gdbm' is not thread-safe.
@@ -25,15 +25,12 @@ thread_local! {
 }
 
 pub fn gdbm_lookup(db_path: impl AsRef<str>, key: &str) -> Result<String, WnError> {
-
     MAPS.with(|maps| {
-
         // do we have an open handle.
         let m = &mut *maps.borrow_mut();
         let path = db_path.as_ref();
         let mut remove = false;
         if let Some(db) = m.get(path) {
-
             // yes. now, every 5 secs, see if database file has changed.
             let mut reopen = false;
             if let Ok(d) = db.lastcheck.duration_since(SystemTime::now()) {
@@ -60,13 +57,13 @@ pub fn gdbm_lookup(db_path: impl AsRef<str>, key: &str) -> Result<String, WnErro
 
         // try to open, then lookup, and save handle.
         let metadata = fs::metadata(path).map_err(|_| WnError::MapNotFound)?;
-        let handle = gdbm::Gdbm::new(Path::new(path), 0, gdbm::READER, 0)
-            .map_err(|_| WnError::MapNotFound)?;
-        let db = GdbmDb{
-            file_name:  path.to_string(),
-            handle:     handle,
-            modified:   metadata.modified().ok(),
-            lastcheck:  SystemTime::now(),
+        let handle =
+            gdbm::Gdbm::new(Path::new(path), 0, gdbm::READER, 0).map_err(|_| WnError::MapNotFound)?;
+        let db = GdbmDb {
+            file_name: path.to_string(),
+            handle:    handle,
+            modified:  metadata.modified().ok(),
+            lastcheck: SystemTime::now(),
         };
         let res = db.handle.fetch(key).map_err(|_| WnError::KeyNotFound);
         m.insert(path.to_owned(), db);
@@ -74,10 +71,15 @@ pub fn gdbm_lookup(db_path: impl AsRef<str>, key: &str) -> Result<String, WnErro
     })
 }
 
-pub fn json_lookup(db_path: impl AsRef<str>, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
+pub fn json_lookup(
+    db_path: impl AsRef<str>,
+    keyname: &str,
+    keyval: &str,
+) -> Result<serde_json::Value, WnError>
+{
     let file = File::open(db_path.as_ref()).map_err(|_| WnError::MapNotFound)?;
-    let entries : serde_json::Value = serde_json::from_reader(file).map_err(|_| WnError::DbOther)?;
-    let mut idx : usize = 0;
+    let entries: serde_json::Value = serde_json::from_reader(file).map_err(|_| WnError::DbOther)?;
+    let mut idx: usize = 0;
     let keyval = match keyval.parse::<u64>() {
         Ok(num) => json!(num),
         Err(_) => json!(keyval),
@@ -108,10 +110,10 @@ impl FromStr for MapType {
 
     fn from_str(s: &str) -> Result<MapType, WnError> {
         let f = match s {
-            "gdbm"  => MapType::Gdbm,
-            "json"  => MapType::Json,
-            "lua"   => MapType::Lua,
-            _       => return Err(WnError::UnknownMapType),
+            "gdbm" => MapType::Gdbm,
+            "json" => MapType::Json,
+            "lua" => MapType::Lua,
+            _ => return Err(WnError::UnknownMapType),
         };
         Ok(f)
     }
@@ -119,8 +121,7 @@ impl FromStr for MapType {
 
 // Serde helper
 pub fn deserialize_map_type<'de, D>(deserializer: D) -> Result<MapType, D::Error>
-    where D: Deserializer<'de>
-{
+where D: Deserializer<'de> {
     let s = String::deserialize(deserializer)?;
     MapType::from_str(&s).map_err(serde::de::Error::custom)
 }
@@ -130,4 +131,3 @@ impl Default for MapType {
         MapType::None
     }
 }
-

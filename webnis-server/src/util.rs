@@ -1,14 +1,14 @@
-use std::collections::HashMap;
 use std::borrow::Cow;
+use std::collections::HashMap;
 
+use actix_web::http::header::{self, HeaderMap, HeaderValue};
+use actix_web::http::StatusCode;
 use actix_web::HttpResponse;
-use actix_web::http::{StatusCode};
-use actix_web::http::header::{self,HeaderMap,HeaderValue};
 
-use percent_encoding::{DEFAULT_ENCODE_SET, percent_decode, utf8_percent_encode};
+use base64;
+use percent_encoding::{percent_decode, utf8_percent_encode, DEFAULT_ENCODE_SET};
 use pwhash;
 use serde_json;
-use base64;
 
 use crate::config;
 
@@ -63,9 +63,7 @@ pub(crate) fn json_error(outer_code: StatusCode, inner_code: Option<StatusCode>,
 }
 
 pub(crate) fn json_result(code: StatusCode, msg: &serde_json::Value) -> HttpResponse {
-    let body = json!({
-        "result": msg
-    });
+    let body = json!({ "result": msg });
     let body = body.to_string() + "\n";
 
     HttpResponse::build(code)
@@ -108,24 +106,24 @@ pub fn decode_post_body(body: &[u8]) -> HashMap<String, String> {
 }
 
 pub(crate) fn check_unix_password(passwd: &str, pwhash: &str) -> bool {
-    let pwbytes : Cow<[u8]> = percent_decode(passwd.as_bytes()).into();
+    let pwbytes: Cow<[u8]> = percent_decode(passwd.as_bytes()).into();
     pwhash::unix::verify(pwbytes, pwhash)
 }
 
 /// Login / password from POST body.
 #[derive(Deserialize)]
 pub struct AuthInfo {
-    pub username:       String,
-    pub password:       String,
+    pub username: String,
+    pub password: String,
     #[serde(flatten)]
-    pub extra:          HashMap<String, serde_json::Value>,
+    pub extra: HashMap<String, serde_json::Value>,
 }
-    
+
 impl AuthInfo {
     /// Decode POST body into a AuthInfo struct
     pub fn from_post_body(body: &[u8], is_json: bool) -> Option<AuthInfo> {
         if is_json {
-           if let Ok(mut ai) = serde_json::from_slice::<AuthInfo>(body) {
+            if let Ok(mut ai) = serde_json::from_slice::<AuthInfo>(body) {
                 if let Cow::Owned(p) = utf8_percent_encode(&ai.password, DEFAULT_ENCODE_SET).into() {
                     ai.password = p;
                 }
@@ -139,13 +137,17 @@ impl AuthInfo {
         let password = hm.remove("password")?;
         let mut extra = HashMap::new();
         for (k, v) in hm.into_iter() {
-                extra.insert(k, json!(v));
+            extra.insert(k, json!(v));
         }
-        Some(AuthInfo{ username, password, extra })
+        Some(AuthInfo {
+            username,
+            password,
+            extra,
+        })
     }
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug, PartialEq)]
 /// Result from check_http_auth
 pub enum AuthResult {
     // no (matching) authorization header
@@ -158,7 +160,6 @@ pub enum AuthResult {
 
 /// Check http authentication.
 pub fn check_http_auth(hdrs: &HeaderMap<HeaderValue>, domain: &config::Domain) -> AuthResult {
-
     // Get authschema from config. Not set? Access allowed.
     let schema = match domain.http_authschema {
         Some(ref s) => s.as_str(),
@@ -170,7 +171,7 @@ pub fn check_http_auth(hdrs: &HeaderMap<HeaderValue>, domain: &config::Domain) -
         Some(ref t) => t.as_str(),
         None => {
             debug!("check_http_auth: domain {}: http_authtoken not set", domain.name);
-            return AuthResult::BadAuth
+            return AuthResult::BadAuth;
         },
     };
 
@@ -197,7 +198,7 @@ pub fn check_http_auth(hdrs: &HeaderMap<HeaderValue>, domain: &config::Domain) -
         },
         Some(_) => {
             debug!("check_http_auth: domain {}: unknown httpencoding", domain.name);
-            return AuthResult::BadAuth
+            return AuthResult::BadAuth;
         },
         None => Cow::from(w[1]),
     };
@@ -209,4 +210,3 @@ pub fn check_http_auth(hdrs: &HeaderMap<HeaderValue>, domain: &config::Domain) -
         AuthResult::BadAuth
     }
 }
-

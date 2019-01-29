@@ -1,22 +1,22 @@
-use std::net::IpAddr;
-use std::cmp::Ordering::{self,Less,Equal,Greater};
+use std::cmp::Ordering::{self, Equal, Greater, Less};
 use std::collections::HashSet;
+use std::net::IpAddr;
 
-use ipnet::{IpNet,Ipv4Net,Ipv6Net};
+use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 
 /// A list of IP subnets. Only used to answer the question
 /// "does the list contain this IpAddr", e.g. for access control.
-pub struct IpList{
-    list:   Vec<IpNet>,
-    set:    HashSet<IpAddr>,
+pub struct IpList {
+    list: Vec<IpNet>,
+    set:  HashSet<IpAddr>,
 }
 
 impl IpList {
     /// create a new iplist
     pub fn new() -> IpList {
-        IpList{
-            list:   Vec::new(),
-            set:    HashSet::new(),
+        IpList {
+            list: Vec::new(),
+            set:  HashSet::new(),
         }
     }
 
@@ -44,11 +44,11 @@ impl IpList {
             IpAddr::V4(ip) => {
                 let ipv4 = Ipv4Net::new(ip, 32).unwrap();
                 self.binary_search_by(|probe| compare_v4(probe, &ipv4))
-            }
+            },
             IpAddr::V6(ip) => {
                 let ipv6 = Ipv6Net::new(ip, 128).unwrap();
                 self.binary_search_by(|probe| compare_v6(probe, &ipv6))
-            }
+            },
         };
         res.is_ok()
     }
@@ -58,8 +58,7 @@ impl IpList {
     /// the maximum number of searches.
     #[inline]
     fn binary_search_by<'a, F>(&'a self, mut f: F) -> Result<usize, usize>
-        where F: FnMut(&'a IpNet) -> Ordering
-    {
+    where F: FnMut(&'a IpNet) -> Ordering {
         let s = &self.list;
         let mut size = s.len();
         if size == 0 {
@@ -73,13 +72,19 @@ impl IpList {
             // mid >= 0: by definition
             // mid < size: mid = size / 2 + size / 4 + size / 8 ...
             let cmp = f(unsafe { s.get_unchecked(mid) });
-            if cmp == Equal { return Ok(mid) }; // <--- This is missing in the standard library
+            if cmp == Equal {
+                return Ok(mid);
+            }; // <--- This is missing in the standard library
             base = if cmp == Greater { base } else { mid };
             size -= half;
         }
         // base is always in [0, size) because base <= mid.
         let cmp = f(unsafe { s.get_unchecked(base) });
-        if cmp == Equal { Ok(base) } else { Err(base + (cmp == Less) as usize) }
+        if cmp == Equal {
+            Ok(base)
+        } else {
+            Err(base + (cmp == Less) as usize)
+        }
     }
 }
 
@@ -95,7 +100,7 @@ fn compare_v4(probe: &IpNet, ip: &Ipv4Net) -> Ordering {
             } else {
                 Less
             }
-        }
+        },
     }
 }
 
@@ -111,7 +116,6 @@ fn compare_v6(probe: &IpNet, ip: &Ipv6Net) -> Ordering {
             } else {
                 Less
             }
-        }
+        },
     }
 }
-
