@@ -259,7 +259,7 @@ impl Webnis {
         };
         let path = format!("{}/{}", dom.db_dir, map.map_file.as_ref().unwrap());
         let line = db::gdbm_lookup(&path, keyval)?;
-        format::line_to_json(&line, format, &map.map_args)
+        format::line_to_json(&line, format, &map.map_output)
     }
 
     fn lookup_json_map(&self, dom: &config::Domain, map: &config::Map, keyname: &str, keyval: &str) -> Result<serde_json::Value, WnError> {
@@ -272,14 +272,6 @@ impl Webnis {
             Ok(serde_json::Value::Null) => Err(WnError::KeyNotFound),
             Ok(m) => Ok(m),
             Err(_) => Err(WnError::Other),
-        }
-    }
-
-    // lookup the password for this domain
-    pub fn domain_password<'a>(&'a self, domain: &str) -> Option<&'a str> {
-        match self.inner.config.find_domain(domain) {
-            None => None,
-            Some(d) => d.password.as_ref().map(|s| s.as_str()),
         }
     }
 }

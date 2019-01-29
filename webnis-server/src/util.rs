@@ -10,6 +10,8 @@ use pwhash;
 use serde_json;
 use base64;
 
+use crate::config;
+
 //pub(crate) type BoxedError = Box<::std::error::Error>;
 //pub(crate) type BoxedFuture = Box<Future<Item=HttpResponse, Error=BoxedError>>;
 //
@@ -30,12 +32,19 @@ pub(crate) fn http_error(code: StatusCode, msg: &'static str) -> HttpResponse {
 }
 
 // helpers.
-pub(crate) fn http_unauthorized() -> HttpResponse {
+pub(crate) fn http_unauthorized(domain: &str, schema: Option<&String>) -> HttpResponse {
     debug!("401 Unauthorized");
-    HttpResponse::Unauthorized()
-        .header(header::CONTENT_TYPE, "text/plain")
-        .header(header::WWW_AUTHENTICATE, "Basic realm=\"webnis\"")
-        .body("Unauthorized - send basic auth\n")
+    let mut resp = HttpResponse::Unauthorized();
+    resp.header(header::CONTENT_TYPE, "text/plain");
+    if let Some(schema) = schema {
+        let wa = if schema.as_str() == "Basic" {
+            format!("{} realm=\"{}\"", schema, domain)
+        } else {
+            schema.to_owned()
+        };
+        resp.header(header::WWW_AUTHENTICATE, wa);
+    }
+    resp.body("Unauthorized - send credentials\n")
 }
 
 pub(crate) fn json_error(outer_code: StatusCode, inner_code: Option<StatusCode>, msg: &str) -> HttpResponse {
@@ -137,7 +146,7 @@ impl AuthInfo {
 }
 
 #[derive(Debug,PartialEq)]
-/// Result from check_basic_auth
+/// Result from check_http_auth
 pub enum AuthResult {
     // no (matching) authorization header
     NoAuth,
@@ -147,33 +156,57 @@ pub enum AuthResult {
     AuthOk,
 }
 
-/// Check basic authentication.
-pub fn check_basic_auth(hdrs: &HeaderMap<HeaderValue>, login: Option<&str>, password: Option<&str>) -> AuthResult {
-    // find header and transform into &str
-    let hdr = match hdrs.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) {
-        None => return AuthResult::NoAuth,
-        Some(h) => h,
+/// Check http authentication.
+pub fn check_http_auth(hdrs: &HeaderMap<HeaderValue>, domain: &config::Domain) -> AuthResult {
+
+    // Get authschema from config. Not set? Access allowed.
+    let schema = match domain.http_authschema {
+        Some(ref s) => s.as_str(),
+        None => return AuthResult::AuthOk,
     };
-    // split and check that first word is 'Basic'
+
+    // Get authtoken from config. Not set? Access denied.
+    let token = match domain.http_authtoken {
+        Some(ref t) => t.as_str(),
+        None => {
+            debug!("check_http_auth: domain {}: http_authtoken not set", domain.name);
+            return AuthResult::BadAuth
+        },
+    };
+
+    // find Authorization header and transform into &str
+    let hdr = match hdrs.get(header::AUTHORIZATION).map(|v| v.to_str()) {
+        Some(Ok(h)) => h,
+        _ => return AuthResult::NoAuth,
+    };
+
+    // split and check that first word matches the required authschema.
     let w = hdr.split_whitespace().collect::<Vec<&str>>();
-    if w.len() < 2 || w[0] != "Basic" {
+    if w.len() < 2 || w[0] != schema {
         return AuthResult::NoAuth;
     }
-    // base64 decode 2nd word and transform into String.
-    let s = match base64::decode(w[1]).ok().and_then(|v| String::from_utf8(v).ok()) {
-        None => return AuthResult::BadAuth,
-        Some(v) => v,
+
+    // if encoding is set, decode.
+    let httptoken = match domain.http_authencoding.as_ref().map(|s| s.as_str()) {
+        Some("base64") => {
+            // base64 decode 2nd word
+            match base64::decode(w[1]).ok().and_then(|v| String::from_utf8(v).ok()) {
+                None => return AuthResult::BadAuth,
+                Some(v) => Cow::from(v),
+            }
+        },
+        Some(_) => {
+            debug!("check_http_auth: domain {}: unknown httpencoding", domain.name);
+            return AuthResult::BadAuth
+        },
+        None => Cow::from(w[1]),
     };
-    // split into name and password.
-    let w = s.splitn(2, ':').collect::<Vec<&str>>();
-    if w.len() != 2 {
-        return AuthResult::BadAuth;
-    }
-    // what is set must match
-    match login.map(|l| l == w[0]).unwrap_or(true) &&
-            password.map(|p| p == w[1]).unwrap_or(true) {
-        true => AuthResult::AuthOk,
-        false => AuthResult::BadAuth,
+
+    // Must match token.
+    if httptoken == token {
+        AuthResult::AuthOk
+    } else {
+        AuthResult::BadAuth
     }
 }
 

@@ -44,15 +44,19 @@ pub struct Server {
 #[derive(Deserialize, Debug, Clone)]
 pub struct Domain {
     /// domain name
-    pub name:       String,
+    pub name:               String,
     /// database directory
-    pub db_dir:     String,
+    pub db_dir:             String,
     /// available (allowed) maps
-    pub maps:       Vec<String>,
+    pub maps:               Vec<String>,
     /// link to the authentication method/map
-    pub auth:       Option<String>,
-    /// password needed to allow access to this domain
-    pub password:   Option<String>,
+    pub auth:               Option<String>,
+    /// HTTP Authentication schema (first thing in the Authorization: header)
+    pub http_authschema:    Option<String>,
+    /// HTTP Token (comes after the schema in the Authorization header).
+    pub http_authtoken:     Option<String>,
+    /// Encoding of the authtoken. For schema 'Basic' this is usually 'base64'.
+    pub http_authencoding:  Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -84,7 +88,7 @@ pub struct Map {
     pub map_file:   Option<String>,
     /// optional args for types like 'fields'
     #[serde(rename = "output")]
-    pub map_args:   Option<HashMap<String, String>>,
+    pub map_output:   Option<HashMap<String, String>>,
     #[serde(flatten)]
     pub submaps:    HashMap<String, Map>,
 }
@@ -130,7 +134,7 @@ fn map_inherit(key: &str, map: &Map, base: &Map) -> Map {
         map_type:       if map.map_type != MapType::None { map.map_type.clone() } else { base.map_type.clone() },
         map_format:     map.map_format.clone().or_else(|| base.map_format.clone()),
         map_file:       map.map_file.clone().or_else(|| base.map_file.clone()),
-        map_args:       map.map_args.clone().or_else(|| base.map_args.clone()),
+        map_output:     map.map_output.clone().or_else(|| base.map_output.clone()),
         submaps:        HashMap::new(),
     }
 }
@@ -213,23 +217,56 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
         // Now walk over all maps and do some basic validity checks.
         for m in &mut mm {
             m.name = k.to_string();
+
+            // Map type must be set.
             if m.map_type == MapType::None {
                     return Err(io::Error::new(io::ErrorKind::InvalidData,
                                     format!("map {}: map_type not set", m.name)));
             }
-            if m.lua_function.is_some() {
-                if m.map_type != MapType::Lua {
+
+            // format = "..." only works with MapType::Gdbm at this time.
+            if m.map_type != MapType::Gdbm && m.map_format.is_some() {
+                return Err(io::Error::new(io::ErrorKind::InvalidData,
+                            format!("map {}: cannot use format with map type {:?}", m.name, m.map_type)));
+            }
+
+            if m.map_type == MapType::Lua {
+                // Type Lua, function must be set.
+                if m.lua_function.is_none() {
                     return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                    format!("map {}: lua_function set, map_type must be \"lua\"", m.name)));
+                                format!("map {}: lua_function not set", m.name)));
                 }
             } else {
+                // lua_function must not be set.
+                if m.lua_function.is_some() {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                format!("map {}: lua_function set, map_type must be \"lua\"", m.name)));
+                }
+
+                // Must have a key.
                 if m.key.is_none() && m.keys.len() == 0 {
                     return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                    format!("map {}: no key", m.name)));
+                                format!("map {}: no key", m.name)));
                 }
+
+                // Must have a filename.
                 if m.map_file.is_none() {
                     return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                    format!("map {}: map file not set", m.name)));
+                                format!("map {}: map file not set", m.name)));
+                }
+
+                // output mapping doesn't work (yet) with all formats.
+                if m.map_output.is_some() {
+                    match m.map_format {
+                        | Some(Format::Json)
+                        | Some(Format::Passwd)
+                        | Some(Format::Group)
+                        | Some(Format::Adjunct) => {
+                            return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                format!("map {}: cannot use output with format {:?}", m.name, m.map_format)));
+                        },
+                        _ => {},
+                    }
                 }
             }
         }

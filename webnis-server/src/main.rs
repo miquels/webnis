@@ -165,10 +165,10 @@ fn main() {
 }
 
 fn check_authorization(req: &HttpRequest<Webnis>, domain: &str) -> Option<HttpResponse> {
-    let state = req.state();
+    let webnis = req.state();
 
     // check the securenets access list.
-    if let Some(ref sn) = state.inner.securenets {
+    if let Some(ref sn) = webnis.inner.securenets {
         trace!("checking securenets");
         if let Some(pa) = req.peer_addr() {
             let mut ip = pa.ip();
@@ -189,14 +189,14 @@ fn check_authorization(req: &HttpRequest<Webnis>, domain: &str) -> Option<HttpRe
         }
     }
 
-    // check the password.
-    let passwd = match state.domain_password(domain) {
-        None => return None,
-        Some(p) => p,
+    // check HTTP authentication.
+    let domdef = match webnis.inner.config.find_domain(domain) {
+        None => return Some(http_error(StatusCode::NOT_FOUND, "Not found")),
+        Some(d) => d,
     };
-    match check_basic_auth(req.headers(), None, Some(passwd)) {
-        AuthResult::NoAuth => Some(http_unauthorized()),
-        AuthResult::BadAuth => Some(http_error(StatusCode::FORBIDDEN, "Bad credentials")),
+    match check_http_auth(req.headers(), domdef) {
+        AuthResult::NoAuth |
+        AuthResult::BadAuth => Some(http_unauthorized(&domdef.name, domdef.http_authschema.as_ref())),
         AuthResult::AuthOk => None,
     }
 }

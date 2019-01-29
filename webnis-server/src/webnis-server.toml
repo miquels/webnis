@@ -40,9 +40,11 @@
 # multiple domains can be configured.
 [[domain]]
   name = "xs4all.nl"
-  # if this is set, the client must send a Authorization: header
-  # with Basic auth. The username is ignored, only the password is checked.
-  password = "donkey jaw"
+  # HTTP authorization. Set like this, it is Basic Authentication.
+  # Other variations are possible (like an X-Api-Key schema).
+  http_authschema = "Basic"
+  http_authtoken = "username:password"
+  http_authencoding = "base64"
   # database directory of the maps. this can be different per domain.
   db_dir = "/var/yp/xs4all.nl"
   # the maps that a client is allowed to do a lookup in.
@@ -52,6 +54,8 @@
 
 # another domain.
 [[domain]]
+  http_authschema = "X-Api-Key"
+  http_authtoken = "679865536768646"
   name = "shell.xs4all.nl"
   db_dir = "/var/yp/shell.xs4all.nl"
   maps = [ "passwd", "group" ]
@@ -75,12 +79,12 @@
 
   # this entry is matched when the lookup key is "name" (or "user",
   # since we defined a key alias).
-  [map.passwd.byname]
+  [map.passwd.name]
     key_alias = { user = "name" }
     file      = "passwd.byname"
 
   # this entry is matched when the lookup key is "uid".
-  [map.passwd.byuid]
+  [map.passwd.uid]
     file = "passwd.byuid"
 
 # this section is (as we have configured it here) not available for lookups
@@ -113,4 +117,17 @@
   type   = "lua"
   # and this is the name of the function
   lua_function = "map_example"
+
+# This is the same as format = "password".
+[map.passwd-other]
+  type = "gdbm"
+  format = "colon-separated"
+  output = { name = "{1}", passwd = "x", uid = "{3}", gid = "{4}", dir = "{6}", shell = "{7}" }
+
+  [map.passwd-other.name]
+    key_alias = { user = "name" }
+    file      = "passwd.byname"
+
+  [map.passwd-other.uid]
+    file = "passwd.byuid"
 
