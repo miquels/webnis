@@ -3,7 +3,7 @@
 
 The server supports several map types and formats.
 
-## Map types (map_type)
+## Map types (type = "....")
 
 ### gdbm
   This is a simple key/value map. The map has only one, unnamed primary key.
@@ -19,14 +19,14 @@ The server supports several map types and formats.
 ### lua
   A lua function, defined in a lua script.
 
-## Map formats (map_format)
+## Map formats (format = "....")
+
+A GDBM lookup returns a blob of data. This data is in a certain format-
+by setting the *format* option in the map definition you tell the server
+how to interpret that data.
 
 ### json
-  Maps in json format are served as-is.
-
-### kv
-  Simple json-like key/value. Example: `name=joop uid=2020 dir=/tmp shell=/bin/sh`.
-  There are no types, and no quoting/escaping of values.
+  The data is in json format and will be served as-is.
 
 ### passwd
   7 colon-separated fields in /etc/passwd format. The Fields are mapped to
@@ -40,27 +40,35 @@ The server supports several map types and formats.
   \>=2 colon-separated fields in /etc/passwd format. The first two fields
   are mapped to `name`, `passwd`, the rest is ignored.
 
-### fields
-  A line with fields separated by whitespace. The field mapping is determined
-  by the `map_args` setting, which can be in a few forms:
+### key-value
+  Simple json-like key/value. Example: `name=joop uid=2020 dir=/tmp shell=/bin/sh`.
+  There are no types, and no quoting/escaping of values. The key/value pairs are
+  put into a JSON object. Values that look like a number will be JSON numbers,
+  other values will be JSON quoted strings.
 
-- `{ field = "2" }` -- the Json reply is the value of the second field (string or number).
-- `{ field = "5", name = "gecos" }` -- the json reply is an object with one member, `gecos`,
-  and the value is that of the fifth field
-- `{ 1 = "name", 2 = "passwd", 3 = "uid", 4 = "gid" }` -- a mapping of fields to
-  an object with members `name`, `passwd`, `uid` and `gid`.
+### colon-separated
+  A line with fields separated by a colon (":"). Each value will be put into
+  a JSON object, keyed by the index of the field, starting at 1.
 
-  If in the args a value "separator" is set, the data will be split with that
-  separator instead of whitespace.
+### tab-separated
+  A line with fields separated by a tab ("\t).
 
-  Example for a password format file defined as map_type `field`:
+### whitespace-separated
+  A line with fields separated by any amount of whitespace (spaces or tabs).
+
+## Map output formats (output = "....")
+
+The output can be transformed by defining an *output* setting. That setting is
+a TOML map. The keys in that map are the keys of the output object, the values
+are interpolated from the values in the TOML map.
+
+Values like {1}, {2} etc map to the values from a \*-separated map. Values like
+{name}, {uid} map to values from a key-value map.
+
+For example, this is requivalent to the *passwd* format:
+
 ```
-[map.passwd.byname]
-  key = "name"
-  map_type = "gdbm"
-  map_format = "fields"
-  map_args = { separator = ":", 1 = "name", 2 = "passwd", 3 = "uid", 4 = "gid", 5 = "gecos", 6 = "dir", 7 = "shell" }
-  map_file = "passwd.byname"
+ format = "colon-separated"
+ output = { name = "{1}", passwd = "{2}", uid = "{3}", gid = "{4}", gecos = "{5}", dir = "{6}", shell = "{7}" }
 ```
-  The `uid` and `gid` members would be output as strings instead of numbers though.
 
