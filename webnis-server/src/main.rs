@@ -135,6 +135,7 @@ fn main() {
 
     let mut server = server::new(move || {
         let webnis = webnis.clone();
+		db::Timer::start_timer();
         vec![
             app_factory("/webnis", webnis.clone()),
             app_factory("/.well-known/webnis", webnis.clone()),
