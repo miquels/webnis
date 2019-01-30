@@ -29,11 +29,11 @@ pub fn gdbm_lookup(db_path: impl AsRef<str>, key: &str) -> Result<String, WnErro
         // do we have an open handle.
         let m = &mut *maps.borrow_mut();
         let path = db_path.as_ref();
-        let mut remove = false;
-        if let Some(db) = m.get(path) {
+        if let Some(mut db) = m.get_mut(path) {
             // yes. now, every 5 secs, see if database file has changed.
             let mut reopen = false;
-            if let Ok(d) = db.lastcheck.duration_since(SystemTime::now()) {
+            let now = SystemTime::now();
+            if let Ok(d) = now.duration_since(db.lastcheck) {
                 if d.as_secs() > 5 {
                     if let Ok(metadata) = fs::metadata(path) {
                         reopen = match (metadata.modified(), db.modified) {
@@ -46,12 +46,10 @@ pub fn gdbm_lookup(db_path: impl AsRef<str>, key: &str) -> Result<String, WnErro
 
             // no change, look up and return.
             if !reopen {
+                db.lastcheck = now;
                 return db.handle.fetch(key).map_err(|_| WnError::KeyNotFound);
             }
 
-            remove = true;
-        }
-        if remove {
             m.remove(path);
         }
 
