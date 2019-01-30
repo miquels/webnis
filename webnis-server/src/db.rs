@@ -43,7 +43,7 @@ impl Actor for Timer {
         // random timer interval between 1.75 and 2.25 seconds.
         let d = Duration::from_millis(1750 + thread_rng().sample(Uniform::new(0u64, 500)));
         ctx.run_interval(d, |t: &mut Timer, _ctx: &mut Context<Self>| {
-			t.interval();
+            t.interval();
         });
     }
 
@@ -54,14 +54,14 @@ impl Actor for Timer {
 
 impl Timer {
     // called from main() to start the timer.
-	pub fn start_timer() {
-		Timer::start_default();
-	}
+    pub fn start_timer() {
+        Timer::start_default();
+    }
 
     // called every few seconds. See if any cached GdbmDb handle has been
     // unused for more than 5 seconds, if so, drop it.
-	pub fn interval(&mut self) {
-		MAPS.with(|maps| {
+    pub fn interval(&mut self) {
+        MAPS.with(|maps| {
             let m = &mut *maps.borrow_mut();
             let now = SystemTime::now();
 
@@ -77,7 +77,7 @@ impl Timer {
                 m.remove(o);
             }
         });
-	}
+    }
 }
 
 fn gdbm_check(path: &str, db: &mut GdbmDb, now: SystemTime) -> bool {
