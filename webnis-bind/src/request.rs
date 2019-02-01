@@ -17,8 +17,8 @@ use tokio::timer::Delay;
 use futures::future;
 use base64;
 
-use super::Context;
-use super::response::Response;
+use crate::Context;
+use crate::response::Response;
 
 const MAX_TRIES: u32 = 8;
 const RETRY_DELAY_MS: u64 = 250;
@@ -51,7 +51,7 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
         }
     }
 
-    let mut anchor;
+    let anchor;
     let token = match ctx.config.http_authencoding.as_ref().map(|s| s.as_str()) {
         Some("base64") => {
             anchor = base64::encode(&ctx.config.http_authtoken);
@@ -129,7 +129,7 @@ fn build_uri(host: &str, path: &str) -> hyper::Uri {
 }
 
 // build a new hyper::Client.
-fn new_client(config: &super::config::Config) -> hyper::Client<HttpsConnector<HttpConnector>> {
+fn new_client(config: &crate::config::Config) -> hyper::Client<HttpsConnector<HttpConnector>> {
     let http2_only = config.http2_only.unwrap_or(false);
     let https = HttpsConnector::new(4).unwrap();
     hyper::Client::builder()
@@ -218,8 +218,8 @@ fn req_with_retries(ctx: &Context, path: String, authorization: String, body: Op
     });
 
     // add a timeout. need to have an answer in 1 second.
-    let timeout = Instant::now() + Duration::from_millis(REQUEST_TIMEOUT_MS);
-    let body_tmout_wrapper = resp_body.deadline(timeout).map_err(|e| {
+    let timeout = Duration::from_millis(REQUEST_TIMEOUT_MS);
+    let body_tmout_wrapper = resp_body.timeout(timeout).map_err(|e| {
         debug!("got error {}", e);
         match e.into_inner() {
             Some(e) => e,

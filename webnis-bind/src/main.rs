@@ -2,20 +2,6 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate serde_json;
-extern crate base64;
-extern crate bytes;
-extern crate env_logger;
-extern crate futures;
-extern crate hyper;
-extern crate hyper_tls;
-extern crate libc;
-extern crate serde;
-extern crate tk_listen;
-extern crate tokio;
-extern crate tokio_codec;
-extern crate tokio_uds;
-extern crate toml;
-extern crate url;
 
 mod config;
 mod request;
@@ -24,13 +10,15 @@ mod response;
 use std::fs;
 use std::io;
 use std::process::exit;
-use std::time::{Duration,Instant};
+use std::time::Duration;
 use std::sync::{Arc,Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use env_logger;
 use futures::prelude::*;
 use futures::stream;
 use futures::sync::mpsc;
+use tokio;
 use tokio::prelude::*;
 use tokio_uds::UnixListener;
 use tokio_codec::Decoder;
@@ -151,8 +139,8 @@ fn main() {
             .for_each(|_| Ok(()));
 
             // add a timeout. FIXME? this is a hard session timeout, not per-request.
-            let timeout = Instant::now() + Duration::new(10, 0);
-            let fut = fut.deadline(timeout).map_err(|e| {
+            let timeout = Duration::new(10, 0);
+            let fut = fut.timeout(timeout).map_err(|e| {
                 debug!("command reader timeout wrapper: error on {:?}", e);
                 ()
             });
