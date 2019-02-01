@@ -51,8 +51,15 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
         }
     }
 
-    let user_pass = format!(":{}", ctx.config.password);
-    let authorization = format!("Basic {}", base64::encode(&user_pass));
+    let mut anchor;
+    let token = match ctx.config.http_authencoding.as_ref().map(|s| s.as_str()) {
+        Some("base64") => {
+            anchor = base64::encode(&ctx.config.http_authtoken);
+            &anchor
+        },
+        _ => &ctx.config.http_authtoken,
+    };
+    let authorization = format!("{} {}", ctx.config.http_authschema, token);
 
     if request.cmd == Cmd::Auth {
         // authentication

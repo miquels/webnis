@@ -1,0 +1,35 @@
+#
+# Settings for webnis-bind, the daemon that maintains the
+# backend connecions to the webnis-server(s).
+#
+
+# The domain to use.
+domain     = "webnis"
+
+# Authorization for this domain. Must be the same as configured
+# on the webnis-server side for this domain.
+#
+# If you set the schema to 'Basic' and the encoding to 'base64', this
+# is simple basic authentication (token in format "username:password").
+http_authschema   = "Basic"
+http_authencoding = "base64"
+http_authtoken    = ":donkey jaw"
+
+# Server to use. Users servers = [ ... ] for multiple servers.
+#server     = "localhost:2884"
+servers     = [ "webnis-1.example.com:2884", "webnis-2.example.com:2884" ]
+
+# Max outstanding HTTP requests to the  server. 32 is the default.
+concurrency = 32
+
+# Force HTTP/2. Recommended. This always uses one TCP connection to the
+# server, regardless of the concurrency. If this is set, "concurrency"
+# is set to 100 minimal.
+http2_only = true
+
+# Restrict uid lookup for non-root-users to their own uid.
+restrict_getpwuid = true
+
+# Restrict gid lookup for non-root-users to gids < 1000 and their own gid.
+restrict_getgrgid = true
+

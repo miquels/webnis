@@ -8,13 +8,15 @@ use toml;
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     #[serde(default)]
-    pub domain:         String,
-    pub password:       String,
-    pub server:         Option<String>,
+    pub domain:             String,
+    pub http_authschema:    String,
+    pub http_authtoken:     String,
+    pub http_authencoding:  Option<String>,
+    pub server:             Option<String>,
     #[serde(default)]
-    pub servers:        Vec<String>,
-    pub http2_only:     Option<bool>,
-    pub concurrency:    Option<usize>,
+    pub servers:            Vec<String>,
+    pub http2_only:         Option<bool>,
+    pub concurrency:        Option<usize>,
     #[serde(default)]
     pub restrict_getpwuid:  bool,
     #[serde(default)]
