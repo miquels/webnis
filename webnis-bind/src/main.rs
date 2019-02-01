@@ -50,7 +50,7 @@ pub struct Context {
 const PROGNAME : &'static str = "webnis-bind";
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     let matches = clap_app!(webnis_bind =>
         (version: "0.1")
