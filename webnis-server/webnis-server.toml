@@ -35,34 +35,39 @@
 
 # putting a lua script name here enables LUA scripting.
 [lua]
-  script = "business-logic.lua"
+  script = "webnis-server.lua"
 
 # multiple domains can be configured.
 [[domain]]
-  name = "xs4all.nl"
+  name = "xs4all"
   # HTTP authorization. Set like this, it is Basic Authentication.
   # Other variations are possible (like an X-Api-Key schema).
   http_authschema = "Basic"
   http_authtoken = "username:password"
   http_authencoding = "base64"
   # database directory of the maps. this can be different per domain.
+  # we use the legacy NIS directory in this example.
   db_dir = "/var/yp/xs4all.nl"
   # the maps that a client is allowed to do a lookup in.
   maps = [ "passwd", "group", "gidlist", "lua_example" ]
   # the [auth] section to use when a client wants to check a username/password.
   auth = "adjunct"
 
-# another domain.
+# Another domain. This one serves different data (note the db_dir setting)
+# and only two maps, the "passwd" and the "group" map.
 [[domain]]
+  name = "shell.xs4all.nl"
   http_authschema = "X-Api-Key"
   http_authtoken = "679865536768646"
-  name = "shell.xs4all.nl"
   db_dir = "/var/yp/shell.xs4all.nl"
   maps = [ "passwd", "group" ]
+  auth = "adjunct"
 
-# authentication section. this says that the username must be looked up
-# in the map "adjunct", which is defined in a [map.adjunct] section below.
-# note that the client is not allowed to do a direct lookup in that map!
+# This defines an authentication section called "adjunct", which is referred
+# to in the [[domain]] sections.
+#
+# This config says that the username must be looked up in the map "adjunct",
+# which is defined in a [map.adjunct] section below.
 [auth.adjunct]
   # mapname
   map = "adjunct"
@@ -71,14 +76,14 @@
 
 # The "passwd" map. This map is equivalent to the system's /etc/passwd.
 #
-# Note thaht we define it in 3 parts: a base map definition, and then two
-# submaps that are used when the keyname is the same as the one from the request.
+# Note that we define it in 3 parts: a base map definition, and then two
+# submaps for different keynames: "user" and "uid".
 [map.passwd]
   type   = "gdbm"
   format = "passwd"
 
   # this entry is matched when the lookup key is "name" (or "user",
-  # since we defined a key alias).
+  # since we define a key alias as well).
   [map.passwd.name]
     key_alias = { user = "name" }
     file      = "passwd.byname"
@@ -111,14 +116,14 @@
   file = "gidlist"
 
 # When a lookup is done in this map, the LUA function "map_example"
-# is called, which is defined in the "business-logic.lua" script.
+# is called, which is defined in the "webnis-server.lua" script.
 [map.lua_example.user]
-  # type is lua, means it's a function we call
+  # type is lua, which means we will call a lua function
   type   = "lua"
-  # and this is the name of the function
+  # and this is the name of that function
   lua_function = "map_example"
 
-# This is the same as format = "password".
+# Example of manual output mapping. This is basically the same as format = "password".
 [map.passwd-other]
   type = "gdbm"
   format = "colon-separated"

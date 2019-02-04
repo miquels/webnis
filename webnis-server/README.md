@@ -30,7 +30,7 @@ Content-Type: application/json
 
 As you can see the reply format is loosely based on JSONRPC.
 
-Currently implemented are:
+A couple of examples (you can define as many maps as you like):
 
 ```
 GET <BASE>/<DOMAIN>/map/passwd?name=<name>
