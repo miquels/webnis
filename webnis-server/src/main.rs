@@ -95,7 +95,7 @@ fn main() {
 
     // initialize lua stuff
     if let Some(ref l) = config.lua {
-        if let Err(e) = lua::lua_init(&l.script, webnis.clone()) {
+        if let Err(e) = lua::lua_init(&l.script) {
             eprintln!("{}: {} {}", PROGNAME, l.script, e);
             exit(1);
         }

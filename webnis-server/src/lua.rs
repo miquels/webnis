@@ -7,7 +7,6 @@ use failure::ResultExt;
 use serde_json;
 use serde_json::Value as JValue;
 
-//use rlua::{Function, Lua, MetaMethod, Result, UserData, UserDataMethods, Variadic};
 use rlua::{self, Function, Lua, MetaMethod, ToLua, UserData, UserDataMethods};
 
 use crate::errors::*;
@@ -15,21 +14,21 @@ use crate::{util, webnis::Webnis};
 
 // main info that interpreter instances use to initialize.
 struct LuaMaster {
-    webnis: Webnis,
     name:   String,
     script: String,
 }
 
 // per-instance interpreter state.
 struct LuaState {
-    lua: Lua,
+    lua:        Lua,
+    did_init:   bool,
 }
 
 // for now, 1 interpreter per thread. this might be excessive- perhaps
 // we want to just start a maximum of N interpreters and multiplex
 // over them. Hey, using actix actors perhaps.
 thread_local! {
-    static LUA: RefCell<Option<LuaState>> = RefCell::new(local_lua_init());
+    static LUA: RefCell<LuaState> = RefCell::new(local_lua_init());
 }
 
 lazy_static! {
@@ -38,14 +37,11 @@ lazy_static! {
 
 /// This is called the first time the thread-local LUA is referenced.
 /// Try to start up an interpreter.
-fn local_lua_init() -> Option<LuaState> {
+fn local_lua_init() -> LuaState {
     let guard = LUA_MASTER.lock().unwrap();
     let lua_master = match &*guard {
         Some(l) => l,
-        None => {
-            debug!("LUA not initialized but someone is trying to use it");
-            return None;
-        },
+        None => panic!("LUA not initialized but someone is trying to use it"),
     };
     let lua = Lua::new();
     if let Err::<(), _>(e) = lua.context(|ctx| {
@@ -56,15 +52,13 @@ fn local_lua_init() -> Option<LuaState> {
         panic!("error loading lua script {}: {}", lua_master.name, e);
     }
 
-    lua.context(|ctx| set_webnis_table(ctx, lua_master.webnis.clone()));
-
-    Some(LuaState { lua: lua })
+    LuaState { lua: lua, did_init: false }
 }
 
 /// Read the lua script from a file, and evaluate it. If it does evaluate
 /// without errors, store the filename and the script so that we can later
 /// create per-thread instances.
-pub(crate) fn lua_init(name: &str, webnis: Webnis) -> Result<(), Error> {
+pub(crate) fn lua_init(name: &str) -> Result<(), Error> {
     let mut guard = LUA_MASTER.lock().unwrap();
     let script = std::fs::read_to_string(name).context(format!("opening {}", name))?;
     let lua = Lua::new();
@@ -81,7 +75,6 @@ pub(crate) fn lua_init(name: &str, webnis: Webnis) -> Result<(), Error> {
     *lua_master = Some(LuaMaster {
         name:   name.to_string(),
         script: script,
-        webnis: webnis,
     });
     Ok(())
 }
@@ -153,38 +146,93 @@ fn lua_value_to_json(lua_value: rlua::Value) -> serde_json::Value {
     }
 }
 
+/// This contains data from the request. It is implemented as a Lua userdata
+/// struct, and passed to the lua auth/lookup hooks.
+#[derive(Default)]
+pub(crate) struct Request {
+    pub domain:   String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub mapname:  Option<String>,
+    pub keyname:  Option<String>,
+    pub keyvalue: Option<String>,
+    pub extra:    HashMap<String, serde_json::Value>,
+}
+
+impl UserData for Request {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_meta_method(MetaMethod::Index, |ctx, this: &Request, arg: String| {
+            // table entry lookup.
+            let r = match arg.as_str() {
+                "domain" => this.domain.clone().to_lua(ctx).ok(),
+                "username" => this.username.clone().map_or(None, |x| x.to_lua(ctx).ok()),
+                "password" => this.password.clone().map_or(None, |x| x.to_lua(ctx).ok()),
+                "mapname" => this.keyname.clone().map_or(None, |x| x.to_lua(ctx).ok()),
+                "keyname" => this.keyname.clone().map_or(None, |x| x.to_lua(ctx).ok()),
+                "keyvalue" => this.keyvalue.clone().map_or(None, |x| x.to_lua(ctx).ok()),
+                x => {
+                    if let Some(jv) = this.extra.get(x) {
+                        Some(json_value_to_lua(ctx, jv.to_owned()))
+                    } else {
+                        None
+                    }
+                },
+            };
+            Ok(r)
+        });
+
+        // check the password in the Request struct against a
+        // password hash (that we probably got from a map lookup).
+        methods.add_method("checkpass", |_, this: &Request, arg: String| {
+            if let Some(ref password) = this.password {
+                Ok(util::check_unix_password(password, &arg))
+            } else {
+                Ok(false)
+            }
+        });
+    }
+}
 /// lua_map calls a lua function. The return value is usually a map, or nil.
 pub(crate) fn lua_map(
-    mapname: &str,
+    webnis: &Webnis,
+    funcname: &str,
     domain: &str,
     keyname: &str,
-    keyval: &str,
+    keyvalue: &str,
 ) -> Result<serde_json::Value, WnError>
 {
     LUA.with(|lua_tls| {
-        let lua_state1 = &*lua_tls.borrow();
-        let lua_state = lua_state1.as_ref().unwrap();
+        let mut lua_state = lua_tls.borrow();
+        if !lua_state.did_init {
+            drop(lua_state);
+            let mut lua_state_mut = lua_tls.borrow_mut();
+	        let webnis = webnis.clone();
+            lua_state_mut.lua.context(|ctx| set_globals(ctx, webnis));
+            lua_state_mut.did_init = true;
+            drop(lua_state_mut);
+            lua_state = lua_tls.borrow();
+        }
 
         lua_state.lua.context(|ctx| {
-            let globals = ctx.globals();
-            let w_obj: rlua::Table = match globals.get("webnis") {
-                Err(e) => {
-                    merror!("lua_map: error setting global webnis table:\n{}", e);
-                    return Err(WnError::LuaError);
-                },
-                Ok(o) => o,
+            // create Request.
+            let req = Request{
+                domain:     domain.to_string(),
+                keyname:    Some(keyname.to_string()),
+                keyvalue:   Some(keyvalue.to_string()),
+                ..Request::default()
             };
-            w_obj.set("domain", domain).unwrap();
 
-            let func: Function = match globals.get(mapname) {
+            // find the lua function we need to call by name.
+            let func: Function = match ctx.globals().get(funcname) {
                 Ok(f) => f,
                 Err(_e) => return Err(WnError::LuaFunctionNotFound),
             };
 
-            let val = match func.call::<_, rlua::Value>((keyname, keyval)) {
+            // Call the function
+            let val = match func.call::<_, rlua::Value>(req) {
                 Ok(v) => v,
                 Err(e) => {
-                    merror!("lua_map: executing {}:\n{}", mapname, e);
+                    merror!("lua_map: executing {}:\n{}", funcname, e);
                     return Err(WnError::LuaError);
                 },
             };
@@ -195,70 +243,34 @@ pub(crate) fn lua_map(
     })
 }
 
-/// This is a userdata struct, passed to the lua authenticate hook.
-/// It allows access to the username / email fields, but not to the
-/// password field- but it can authenticate.
-pub struct AuthInfo {
-    pub username: String,
-    pub password: String,
-    pub map:      Option<String>,
-    pub key:      Option<String>,
-    pub extra:    HashMap<String, serde_json::Value>,
-}
-
-impl UserData for AuthInfo {
-    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_meta_method(MetaMethod::Index, |lua, this: &AuthInfo, arg: String| {
-            match arg.as_str() {
-                "username" => this.username.clone().to_lua(lua).map(|x| Some(x)),
-                "password" => this.password.clone().to_lua(lua).map(|x| Some(x)),
-                "map" => this.map.clone().to_lua(lua).map(|x| Some(x)),
-                "key" => this.key.clone().to_lua(lua).map(|x| Some(x)),
-                x => {
-                    if let Some(jv) = this.extra.get(x) {
-                        Ok(Some(json_value_to_lua(lua, jv.to_owned())))
-                    } else {
-                        Ok(None)
-                    }
-                },
-            }
-        });
-        methods.add_method("checkpass", |_, this: &AuthInfo, arg: String| {
-            Ok(util::check_unix_password(&this.password, &arg))
-        });
-    }
-}
-
 /// lua_auth calls a lua function.
 /// returns a json value on success, json null on auth fail, error on any errors.
 pub(crate) fn lua_auth(
+    webnis: &Webnis,
     funcname: &str,
-    domain: &str,
-    ai: AuthInfo,
+    req: Request,
 ) -> Result<(serde_json::Value, u16), WnError>
 {
     LUA.with(|lua_tls| {
-        let lua_state1 = &*lua_tls.borrow();
-        let lua_state = lua_state1.as_ref().unwrap();
+        let mut lua_state = lua_tls.borrow();
+        if !lua_state.did_init {
+            drop(lua_state);
+            let mut lua_state_mut = lua_tls.borrow_mut();
+	        let webnis = webnis.clone();
+            lua_state_mut.lua.context(|ctx| set_globals(ctx, webnis));
+            lua_state_mut.did_init = true;
+            drop(lua_state_mut);
+            lua_state = lua_tls.borrow();
+        }
 
         lua_state.lua.context(|ctx| {
-            let globals = ctx.globals();
-            let w_obj: rlua::Table = match globals.get("webnis") {
-                Err(e) => {
-                    merror!("lua_map: error setting global webnis table:\n{}", e);
-                    return Err(WnError::LuaError);
-                },
-                Ok(o) => o,
-            };
-            w_obj.set("domain", domain).unwrap();
-
-            let func: Function = match globals.get(funcname) {
+            let func: Function = match ctx.globals().get(funcname) {
                 Ok(f) => f,
                 Err(_e) => return Err(WnError::LuaFunctionNotFound),
             };
 
             // function can return 0, 1 or 2 values.
-            let multival = match func.call::<_, rlua::MultiValue>(ai) {
+            let multival = match func.call::<_, rlua::MultiValue>(req) {
                 Ok(v) => v,
                 Err(e) => {
                     merror!("lua_auth: executing {}:\n{}", funcname, e);
@@ -300,31 +312,19 @@ pub(crate) fn lua_auth(
     })
 }
 
-fn set_webnis_table(ctx: rlua::Context, webnis: Webnis) {
+fn set_globals(ctx: rlua::Context, webnis: Webnis) {
     let table = ctx.create_table().expect("failed to create table");
     let globals = ctx.globals();
 
     let map_lookup = {
         let webnis = webnis.clone();
         ctx.create_function(
-            move |ctx, (mapname, keyname, keyvalue): (String, String, String)| {
-                // it gets a bit verbose when you want to log errors
-                // (as opposed to sending them up, which might be better..)
-                let w_obj: rlua::Table = match ctx.globals().get("webnis") {
-                    Ok(w) => w,
-                    Err(e) => {
-                        warn!("map_lookup: get webnis global: {}", e);
-                        return Err(e);
-                    },
+            move |ctx, (req, mapname, keyname, keyvalue): (rlua::AnyUserData, String, String, String)| {
+                let req = match req.borrow::<Request>() {
+                    Ok(r) => r,
+                    Err(e) => return Err(e),
                 };
-                let domain: String = match w_obj.get("domain") {
-                    Ok(d) => d,
-                    Err(e) => {
-                        warn!("map_lookup: webnis.domain: {}", e);
-                        return Err(e);
-                    },
-                };
-                let v = match webnis.lua_map_lookup(&domain, &mapname, &keyname, &keyvalue) {
+                let v = match webnis.lua_map_lookup(&req.domain, &mapname, &keyname, &keyvalue) {
                     Ok(jv) => json_value_to_lua(ctx, jv),
                     Err(e) => {
                         warn!("map_lookup {} {}={}: {}", mapname, keyname, keyvalue, e);
@@ -339,28 +339,17 @@ fn set_webnis_table(ctx: rlua::Context, webnis: Webnis) {
     table
         .set("map_lookup", map_lookup)
         .expect("failed to insert into table");
-    //globals.set("webnis_map_lookup", map_lookup).unwrap();
 
     let map_auth = {
         ctx.create_function(
-            move |ctx, (mapname, keyname, username, password): (String, String, String, String)| {
-                // it gets a bit verbose when you want to log errors
-                // (as opposed to sending them up, which might be better..)
-                let w_obj: rlua::Table = match ctx.globals().get("webnis") {
-                    Ok(w) => w,
-                    Err(e) => {
-                        warn!("map_lookup: get webnis global: {}", e);
-                        return Err(e);
-                    },
+            move |ctx, (req, mapname, keyname): (rlua::AnyUserData, String, String)| {
+                let req = match req.borrow::<Request>() {
+                    Ok(r) => r,
+                    Err(e) => return Err(e),
                 };
-                let domain: String = match w_obj.get("domain") {
-                    Ok(d) => d,
-                    Err(e) => {
-                        warn!("map_lookup: webnis.domain: {}", e);
-                        return Err(e);
-                    },
-                };
-                let v = match webnis.lua_map_auth(&domain, &mapname, &keyname, &username, &password) {
+                let username = req.username.as_ref().ok_or(rlua::Error::RuntimeError("username not set".into()))?;
+                let password = req.password.as_ref().ok_or(rlua::Error::RuntimeError("password not set".into()))?;
+                let v = match webnis.lua_map_auth(&req.domain, &mapname, &keyname, &username, &password) {
                     Ok(jv) => json_value_to_lua(ctx, JValue::Bool(jv)),
                     Err(e) => {
                         warn!("map_auth {} {}={}: {}", mapname, keyname, username, e);
@@ -375,7 +364,6 @@ fn set_webnis_table(ctx: rlua::Context, webnis: Webnis) {
     table
         .set("map_auth", map_auth)
         .expect("failed to insert into table");
-    //globals.set("webnis_map_auth", map_auth).unwrap();
 
     globals.set("webnis", table).expect("failed to set global webnis");
 

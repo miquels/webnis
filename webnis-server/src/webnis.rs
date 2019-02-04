@@ -72,9 +72,9 @@ impl Webnis {
     }
 
     // authenticate user
-    pub fn handle_auth(&self, domain: String, is_json: bool, body: Vec<u8>) -> HttpResponse {
+    pub fn handle_auth(&self, domainname: String, is_json: bool, body: Vec<u8>) -> HttpResponse {
         // lookup domain in config
-        let domain = match self.inner.config.find_domain(&domain) {
+        let domain = match self.inner.config.find_domain(&domainname) {
             None => return json_error(StatusCode::BAD_REQUEST, None, "Domain not found"),
             Some(d) => d,
         };
@@ -93,14 +93,16 @@ impl Webnis {
 
         // perhaps it's LUA auth?
         if let Some(ref lua_func) = auth.lua_function {
-            let lauth = lua::AuthInfo {
-                username: authinfo.username,
-                password: authinfo.password,
-                map:      auth.map.clone(),
-                key:      auth.key.clone(),
-                extra:    authinfo.extra,
+            let req = lua::Request {
+                domain:     domainname,
+                username:   Some(authinfo.username),
+                password:   Some(authinfo.password),
+                mapname:    auth.map.clone(),
+                keyname:    auth.key.clone(),
+                extra:      authinfo.extra,
+                ..lua::Request::default()
             };
-            let res = match lua::lua_auth(lua_func, &domain.name, lauth) {
+            let res = match lua::lua_auth(self, lua_func, req) {
                 Ok((serde_json::Value::Null, status)) => {
                     if status == 0 {
                         json_error(
@@ -318,7 +320,7 @@ impl Webnis {
         keyval: &str,
     ) -> Result<serde_json::Value, WnError>
     {
-        match lua::lua_map(&map.lua_function.as_ref().unwrap(), &dom.name, keyname, keyval) {
+        match lua::lua_map(self, &map.lua_function.as_ref().unwrap(), &dom.name, keyname, keyval) {
             Ok(serde_json::Value::Null) => Err(WnError::KeyNotFound),
             Ok(m) => Ok(m),
             Err(_) => Err(WnError::Other),
