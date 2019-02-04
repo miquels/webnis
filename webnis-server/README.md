@@ -21,7 +21,7 @@ what format the source map is in.
 The request to the webnis server is a simple HTTPS request, like:
 
 ```
-GET /webnis/my.domain/map/passwd?name=mikevs
+GET /webnis/my.domain/map/passwd?username=mikevs
 HTTP/1.1 200 OK
 Content-Type: application/json
 
