@@ -11,6 +11,7 @@ use percent_encoding::{
 };
 
 use pamsm::{self,PamServiceModule,PamError};
+use pamsm::pam_raw::{get_item, PamHandle, PamItemType, PamResult};
 
 static SOCKADDR: &'static str = "/var/run/webnis-bind.sock";
 
@@ -53,14 +54,16 @@ impl PamServiceModule for Webnis {
         let _debug = (pam_args & PamArgs::DEBUG as u32) != 0;
 
         let user = match pam.get_user(None) {
-            Ok(Some(u)) => u,
+            Ok(Some(u)) => match u.to_str() {
+                Ok(s) => s,
+                Err(_) => return PamError::AUTH_ERR,
+            },
             Ok(None) => return PamError::USER_UNKNOWN,
             Err(e) => return e,
         };
-        let user = match user.to_str() {
-            Ok(s) => s,
-            Err(_) => return PamError::AUTH_ERR,
-        };
+        if user.contains(|c: char| c.is_whitespace()) {
+            return PamError::AUTH_ERR;
+        }
 
         let pass = match pam.get_authtok(None) {
             Ok(Some(p)) => p,
@@ -68,9 +71,39 @@ impl PamServiceModule for Webnis {
             Err(e) => return e,
         };
         let pass : String = percent_encode(pass.to_bytes(), QUERY_ENCODE_SET).collect();
+        if pass.contains(|c: char| c.is_whitespace()) {
+            // can't happen.
+            return PamError::AUTH_ERR;
+        }
+
+        // The service name should always be present.
+        let service = match get_service(&pam) {
+            Ok(Some(s)) => match s.to_str() {
+                Ok(s) => s,
+                Err(_) => return PamError::AUTH_ERR,
+            },
+            Ok(None) => return PamError::AUTH_ERR,
+            Err(e) => return e,
+        };
+        if service.contains(|c: char| c.is_whitespace()) {
+            return PamError::AUTH_ERR;
+        }
+
+        // The remote IP is optional.
+        let remote = match pam.get_rhost() {
+            Ok(Some(r)) => match r.to_str() {
+                Ok(s) => Some(s),
+                Err(_) => return PamError::AUTH_ERR,
+            },
+            Ok(None) => None,
+            Err(e) => return e,
+        };
+        if remote.is_some() && remote.unwrap().contains(|c: char| c.is_whitespace()) {
+            return PamError::AUTH_ERR;
+        }
 
         // run authentication.
-        match wnbind_auth(user, &pass, _debug) {
+        match wnbind_auth(user, &pass, service, remote, _debug) {
             Ok(_) => PamError::SUCCESS,
             Err(e) => e,
         }
@@ -78,7 +111,7 @@ impl PamServiceModule for Webnis {
 }
 
 // open socket, auth once, read reply, return.
-fn wnbind_try(user: &str, pass: &str, _debug: bool) -> Result<(), PamError> {
+fn wnbind_try(user: &str, pass: &str, service: &str, remote: Option<&str>, _debug: bool) -> Result<(), PamError> {
 
     // connect to webnis-bind.
     let mut socket = match UnixStream::connect(SOCKADDR) {
@@ -95,7 +128,12 @@ fn wnbind_try(user: &str, pass: &str, _debug: bool) -> Result<(), PamError> {
     socket.set_write_timeout(Some(Duration::from_millis(REQUEST_WRITE_TIMEOUT_MS))).ok();
 
     // send request.
-    let b = format!("auth {} {}\n", user, pass).into_bytes();
+    let b = if let Some(r) = remote {
+        format!("auth {} {} {} {}\n", user, pass, service, r)
+    } else {
+        format!("auth {} {} {}\n", user, pass, service)
+    }.into_bytes();
+
     if let Err(e) = socket.write_all(&b) {
         #[cfg(debug_assertions)]
         {
@@ -152,9 +190,9 @@ fn wnbind_try(user: &str, pass: &str, _debug: bool) -> Result<(), PamError> {
 }
 
 // call wnbind_try() and sleep/retry once if we fail.
-fn wnbind_auth(user: &str, pass: &str, _debug: bool) -> Result<(), PamError> {
+fn wnbind_auth(user: &str, pass: &str, service: &str, remote: Option<&str>, _debug: bool) -> Result<(), PamError> {
     for tries in 0 .. MAX_TRIES {
-        match wnbind_try(user, pass, _debug) {
+        match wnbind_try(user, pass, service, remote, _debug) {
             Ok(r) => return Ok(r),
             Err(PamError::AUTH_ERR) => return Err(PamError::AUTH_ERR),
             _ => {
@@ -173,6 +211,24 @@ fn from_io_error(e: std::io::Error) -> PamError {
         std::io::ErrorKind::TimedOut|
         std::io::ErrorKind::Interrupted => PamError::AUTHINFO_UNAVAIL,
         _ => PamError::AUTH_ERR,
+    }
+}
+
+use std::os::raw::c_char;
+use std::ffi::CStr;
+
+// "struct Pam" is exactly this, but we can't get at the internal
+// PamHandle to call get_item with it. So we transmute the reference
+// to struct Pam to a reference to struct Pam2 here.
+struct Pam2(PamHandle);
+
+// missing implementation in pamsm, so define it here.
+fn get_service(pam: &pamsm::Pam) -> PamResult<Option<&CStr>> {
+    // Yuck. Should open an issue with pamsm.
+    let pam = unsafe { std::mem::transmute::<_, &Pam2>(pam) };
+    let pointer = get_item(pam.0, PamItemType::SERVICE)?;
+    unsafe {
+        Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
     }
 }
 

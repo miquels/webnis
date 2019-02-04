@@ -12,16 +12,8 @@ sending the request , and receiving/decoding the JSON response.
 The line based protocol between the module and webnis-bind is like:
 
 ```
->> SET service=webnis
->> SET remotehost=1.2.3.4
->> AUTH mikevs password
+>> AUTH mikevs password service [remoteip]
 << 200 OK
 ```
 Note that the `password` needs to be percent-encoded.
-
-TODO
-----
-
-The SET name=value part is not yet implemented. We should use this
-to forward the PAM\_SERVICE and PAM\_RHOST items to the webnis server.
 
