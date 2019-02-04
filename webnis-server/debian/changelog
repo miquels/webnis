@@ -1,0 +1,12 @@
+webnis-server (0.2) stretch; urgency=low
+
+  * changed a lot of things (see git log for details)
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Mon, 04 Feb 2019 22:47:12 +0100
+
+webnis-server (0.1) stretch; urgency=low
+
+  * initial release
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Wed, 30 Jan 2019 00:20:25 +0100
+

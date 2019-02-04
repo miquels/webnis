@@ -1,0 +1,12 @@
+[Unit]
+Description=Webnis bind daemon
+After=network.target
+ConditionPathExists=/etc/webnis-bind.toml
+
+[Service]
+ExecStart=/usr/sbin/webnis-bind
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+

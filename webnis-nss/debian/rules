@@ -1,0 +1,17 @@
+#! /usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	@if ! command -v cargo >/dev/null; then \
+		echo "Rust is not installed ("cargo" command not found)" >&2; \
+		exit 1; fi
+	cargo build --release
+
+override_dh_auto_clean:
+
+override_dh_auto_install:
+	mkdir -p debian/webnis-nss/lib/$(DEB_HOST_MULTIARCH)
+	cp ../target/release/libnss_webnis.so debian/webnis-nss/lib/$(DEB_HOST_MULTIARCH)/libnss_webnis.so.2
+

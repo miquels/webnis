@@ -1,0 +1,17 @@
+#! /usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	@if ! command -v cargo >/dev/null; then \
+		echo "Rust is not installed ("cargo" command not found)" >&2; \
+		exit 1; fi
+	cargo build --release
+
+override_dh_auto_clean:
+
+override_dh_auto_install:
+	mkdir -p debian/webnis-pam/lib/security
+	cp ../target/release/libpam_webnis.so debian/webnis-pam/lib/security/pam_webnis.so
+

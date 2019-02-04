@@ -1,0 +1,12 @@
+[Unit]
+Description=Webnis server
+After=network.target
+ConditionPathExists=/etc/webnis-server.toml
+
+[Service]
+ExecStart=/usr/sbin/webnis-server
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+

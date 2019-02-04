@@ -1,0 +1,6 @@
+--tar-ignore
+--tar-ignore=target
+--tar-ignore=README.lua.md
+--tar-ignore=webnis-server-xs4all.toml
+--tar-ignore=xs4all-logic.lua
+--tar-ignore=ypserv.securenets
