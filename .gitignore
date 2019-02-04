@@ -1,2 +1,7 @@
 /target
 **/*.rs.bk
+*.deb
+*.dsc
+*.tar.xz
+*.buildinfo
+*.changes
