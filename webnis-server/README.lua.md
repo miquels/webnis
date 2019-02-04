@@ -2,18 +2,19 @@
 LUA API
 =======
 
-A Lua function call be called for authentication, or map lookup.
+A Lua function can be called for authentication, or map lookup. See the
+comments in the example configuration file for how to configure that.
 
 Webnis library
 --------------
 
-There is a `webnis` library that is imported by default that contains
+There is a `webnis` library which is imported by default that contains
 functions to do map lookups and authentication. The functions are:
 
 ```
 let result = webnis.map_lookup(request, mapname, keyname, keyvalue)
 ```
-Looks up the `keyname`/`keyvalue` pair (e.g. user=exampleuser) in the map `mapname`.
+Looks up the `keyname`/`keyvalue` pair (e.g. `user=exampleuser`) in the map `mapname`.
 The return value is the result of the lookup or nil if it failed.
 
 ```
@@ -23,6 +24,10 @@ Looks up the `keyname`/`request.username` pair in the map `mapname`. If
 present, and the returned object has a member `password`, `request.password`
 is checked against that.
 
+Notice that in both cases the `request` table is passed in as the
+first argument. This is because the `request` contains context information
+such as the `domain` for this request, the user's password, etc.
+
 Authentication
 --------------
 
@@ -30,11 +35,11 @@ Authentication
 result = auth_function(request)
 returnobject,status = auth_function(request)
 ```
-The passed in `request` table contains an `request.username` and an
+The passed in `request` table contains a `request.username` and a
 `request.password`. These are the username/password query parameters passed
-in in the POST body of the request.  It also contains an `request.domain`
+in in the POST body of the request.  It also contains a `request.domain`
 value which is the webnis domain for this request.  Any additional query
-parameters are also available (for example, "service" or "remote").
+parameters are also available (for example, `service` or `remote`).
 
 Return value
 ------------

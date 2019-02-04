@@ -2,13 +2,16 @@
 -- helper function, dprint logs at Log::Level::Debug in rust.
 function dprintf(...) dprint(string.format(...)) end
 
--- example map function. In the example config, this function
--- is called with request.keyname=user, request.keyvalue=truus
+-- example map function. In the example configuration file this
+-- function is called when you do a lookup in the map 'example_map'.
+--
+-- If you request this URL:
 -- https://servername/.well-known/webnis/<domain>/map/example_map?user=truus
+-- this function gets called with request.keyname=user, request.keyvalue=truus.
 function map_example(req)
 
 	-- maps to rust debug! facility
-	dprintf("lua map_email: keyname %s, keyval %s", keyname, username)
+	dprintf("lua map_email: keyname %s, keyval %s", req.keyname, req.keyvalue)
 
 	local email
 	local username = req.keyvalue
@@ -48,8 +51,9 @@ function map_example(req)
 	return ret
 end
 
--- authentication. the "request" table that is passed contains a
--- username and a password.
+--
+-- authentication. the "request" table contains a username and a password.
+--
 function auth_example(req)
 	dprintf("auth_xs4all: username [%s]", req.username)
 	local username = req.username
@@ -59,7 +63,7 @@ function auth_example(req)
 	-- auth by email? map to username
 	if string.find(username, "@") ~= nil then
 		-- map email address to username
-		local m = webnismap_lookup(req, "email2user", "address", email)
+		local m = webnis.map_lookup(req, "email2user", "address", email)
 		if m == nil then
 			dprint("email not found")
 			return nil
