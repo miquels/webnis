@@ -72,20 +72,20 @@
   # mapname
   map = "adjunct"
   # key to use
-  key = "name"
+  key = "username"
 
 # The "passwd" map. This map is equivalent to the system's /etc/passwd.
 #
 # Note that we define it in 3 parts: a base map definition, and then two
-# submaps for different keynames: "user" and "uid".
+# submaps for different keynames: "username" and "uid".
 [map.passwd]
   type   = "gdbm"
   format = "passwd"
 
-  # this entry is matched when the lookup key is "name" (or "user",
+  # this entry is matched when the lookup key is "username" (or "user",
   # since we define a key alias as well).
-  [map.passwd.name]
-    key_alias = { user = "name" }
+  [map.passwd.username]
+    key_alias = { user = "username" }
     file      = "passwd.byname"
 
   # this entry is matched when the lookup key is "uid".
@@ -101,9 +101,9 @@
 
 # The maptype here is "json", which means that the file contains
 # a JSON array, and each array element contains a group object.
-# The objects can be looked up by "name" and "gid".
+# The objects can be looked up by "group" and "gid".
 [map.group]
-  keys = [ "name", "gid" ]
+  keys = [ "group", "gid" ]
   type = "json"
   file = "group"
 
@@ -111,13 +111,13 @@
 # It is used to find all the groups that a user is a member of. Rather
 # than scanning the entire "group" map, we have a direct
 # username -> grouplist map.
-[map.gidlist.name]
+[map.gidlist.username]
   type = "json"
   file = "gidlist"
 
 # When a lookup is done in this map, the LUA function "map_example"
 # is called, which is defined in the "webnis-server.lua" script.
-[map.lua_example.user]
+[map.lua_example.username]
   # type is lua, which means we will call a lua function
   type   = "lua"
   # and this is the name of that function
@@ -129,8 +129,8 @@
   format = "colon-separated"
   output = { name = "{1}", passwd = "x", uid = "{3}", gid = "{4}", dir = "{6}", shell = "{7}" }
 
-  [map.passwd-other.name]
-    key_alias = { user = "name" }
+  [map.passwd-other.username]
+    key_alias = { user = "username" }
     file      = "passwd.byname"
 
   [map.passwd-other.uid]

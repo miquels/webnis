@@ -9,13 +9,13 @@ use crate::errors::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct Passwd<'a> {
-    pub name:   &'a str,
-    pub passwd: &'a str,
-    pub uid:    u32,
-    pub gid:    u32,
-    pub gecos:  &'a str,
-    pub dir:    &'a str,
-    pub shell:  &'a str,
+    pub username:   &'a str,
+    pub passwd:     &'a str,
+    pub uid:        u32,
+    pub gid:        u32,
+    pub gecos:      &'a str,
+    pub home:       &'a str,
+    pub shell:      &'a str,
 }
 
 impl<'a> Passwd<'a> {
@@ -25,12 +25,12 @@ impl<'a> Passwd<'a> {
             return Err(WnError::DeserializeData);
         }
         let p = Passwd {
-            name:   fields[0],
-            passwd: fields[1],
-            uid:    fields[2].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
-            gid:    fields[3].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
-            gecos:  fields[4],
-            dir:    fields[5],
+            username: fields[0],
+            passwd:   fields[1],
+            uid:      fields[2].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
+            gid:      fields[3].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
+            gecos:    fields[4],
+            home:     fields[5],
             shell:  fields[6],
         };
         Ok(p)
@@ -39,8 +39,8 @@ impl<'a> Passwd<'a> {
 
 #[derive(Serialize, Deserialize)]
 pub struct Adjunct<'a> {
-    pub name:   &'a str,
-    pub passwd: &'a str,
+    pub username:   &'a str,
+    pub passwd:     &'a str,
 }
 
 impl<'a> Adjunct<'a> {
@@ -50,8 +50,8 @@ impl<'a> Adjunct<'a> {
             return Err(WnError::DeserializeData);
         }
         let p = Adjunct {
-            name:   fields[0],
-            passwd: fields[1],
+            username:   fields[0],
+            passwd:     fields[1],
         };
         Ok(p)
     }
@@ -59,10 +59,10 @@ impl<'a> Adjunct<'a> {
 
 #[derive(Serialize, Deserialize)]
 pub struct Group<'a> {
-    pub name:   &'a str,
+    pub group:   &'a str,
     pub passwd: &'a str,
     pub gid:    u32,
-    pub mem:    Vec<&'a str>,
+    pub members:    Vec<&'a str>,
 }
 
 impl<'a> Group<'a> {
@@ -72,10 +72,10 @@ impl<'a> Group<'a> {
             return Err(WnError::DeserializeData);
         }
         let g = Group {
-            name:   fields[0],
-            passwd: fields[1],
-            gid:    fields[2].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
-            mem:    fields[3].split(',').collect::<Vec<_>>(),
+            group:      fields[0],
+            passwd:     fields[1],
+            gid:        fields[2].parse::<u32>().map_err(|_| WnError::DeserializeData)?,
+            members:    fields[3].split(',').collect::<Vec<_>>(),
         };
         Ok(g)
     }
@@ -173,7 +173,7 @@ impl Fields {
         };
 
         // no output mapping, return hashmap keyed by the index number, starting at 1.
-        // { 1 => "name", 2 => "passwd", 3 => uid, ... }
+        // { 1 => "username", 2 => "passwd", 3 => uid, ... }
         if output.is_none() {
             let res = fields
                 .into_iter()

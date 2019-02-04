@@ -101,11 +101,11 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
 
     // map lookup
     let (map, param) = match request.cmd {
-        Cmd::GetPwNam => ("passwd", "name"),
+        Cmd::GetPwNam => ("passwd", "username"),
         Cmd::GetPwUid => ("passwd", "uid"),
-        Cmd::GetGrNam => ("group", "name"),
+        Cmd::GetGrNam => ("group", "group"),
         Cmd::GetGrGid => ("group", "gid"),
-        Cmd::GetGidList => ("gidlist", "name"),
+        Cmd::GetGidList => ("gidlist", "username"),
         _ => unreachable!(),
     };
     let path = format!("/{}/map/{}?{}={}&cred_uid={}",

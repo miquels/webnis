@@ -4,7 +4,7 @@
 This is a daemon that sits between webnis-nss and webnis-pam and the
 webnis server that has the webnis data.
 
-It accepts requests like GETPWNAM <name>, GETGRGID <number>. It translates
+It accepts requests like GETPWNAM <username>, GETGRGID <number>. It translates
 that to a URL on a webnis server, goes out on the net to retrieve the data,
 and returns it to the local client on the UNIX socket.
 
@@ -35,11 +35,11 @@ nc -N -U /var/run/webnis-bind.sock
 The request to the webnis server is a simple HTTPS request, like:
 
 ```
-GET /.well-known/webnis/default/map/passwd?name=mikevs
+GET /.well-known/webnis/default/map/passwd?username=mikevs
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{"result":{"dir":"/home/mikevs","gecos":"Mike","gid":1000,"passwd":"x","shell":"","uid":1000,"user":"mikevs"}}
+{"result":{"home":"/home/mikevs","gecos":"Mike","gid":1000,"passwd":"x","shell":"","uid":1000,"username":"mikevs"}}
 ```
 
 The translation from JSON to unix-flavored colon-separated-values is so
@@ -49,18 +49,18 @@ discovered the [json crate](https://crates.io/crates/json) which is much smaller
 
 Try it yourself:
 ```
-curl -i https://<WEBNISSERVER>/.well-known/webnis/default/map/passwd?name=stuser
+curl -i https://<WEBNISSERVER>/.well-known/webnis/default/map/passwd?username=stuser
 ```
 
 Currently implemented are:
 
 ```
-GETPWNAM <name>				GET <BASE>/<DOMAIN>/map/passwd?name=<name>
-GETPWUID <uid>				GET <BASE>/<DOMAIN>/map/passwd?uid=<number>
-GETGRNAM <name>				GET <BASE>/<DOMAIN>/map/group?name=<name>
-GETGRGID <gid>				GET <BASE>/<DOMAIN>/map/group?gid=<number>
-GETGIDLIST <name>			GET <BASE>/<DOMAIN>/map/gidlist?name=<name>
-AUTH <name> <passwd> [service] [remote]	POST <BASE>/<DOMAIN>/auth
+GETPWNAM <name>					GET <BASE>/<DOMAIN>/map/passwd?username=<name>
+GETPWUID <uid>					GET <BASE>/<DOMAIN>/map/passwd?uid=<number>
+GETGRNAM <name>					GET <BASE>/<DOMAIN>/map/group?group=<name>
+GETGRGID <gid>					GET <BASE>/<DOMAIN>/map/group?gid=<number>
+GETGIDLIST <name>				GET <BASE>/<DOMAIN>/map/gidlist?username=<name>
+AUTH <username> <passwd> [service] [remote]	POST <BASE>/<DOMAIN>/auth
 ```
 
 `<BASE>` defaults to `/.well-known/webnis`, and `<DOMAIN>` defaults to .... `default`.

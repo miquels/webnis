@@ -184,13 +184,13 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
         //
         // 2. a map definition with the keyname included in the name.
         //    There can be multiple definitions with the same basename.
-        //    E.g [passwd.name] and [passwd.uid] => MapOrMaps::Maps( HashMap<String, Map> )
-        //    The hashmap has two entries here, with keys "name" and "uid".
+        //    E.g [passwd.username] and [passwd.uid] => MapOrMaps::Maps( HashMap<String, Map> )
+        //    The hashmap has two entries here, with keys "username" and "uid".
         //
         // 3. Like 2, but with a basemap definition.
-        //    E.g [passwd], [passwd.name], [passwd.uid].
+        //    E.g [passwd], [passwd.username], [passwd.uid].
         //    This results in a single Map (MapOrMaps::Map), where the
-        //    passwd.name and passwd.uid maps can be found in the map.submaps member.
+        //    passwd.username and passwd.uid maps can be found in the map.submaps member.
         //
         // We put all definitions with the same basename together in a Vec.
         let mut mm = Vec::new();

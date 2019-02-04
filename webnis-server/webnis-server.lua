@@ -6,8 +6,8 @@ function dprintf(...) dprint(string.format(...)) end
 -- function is called when you do a lookup in the map 'example_map'.
 --
 -- If you request this URL:
--- https://servername/.well-known/webnis/<domain>/map/example_map?user=truus
--- this function gets called with request.keyname=user, request.keyvalue=truus.
+-- https://servername/.well-known/webnis/<domain>/map/example_map?username=truus
+-- this function gets called with request.keyname=username, request.keyvalue=truus.
 function map_example(req)
 
 	-- maps to rust debug! facility
@@ -33,7 +33,7 @@ function map_example(req)
 
 	-- now username is syntactically valid
 	-- see if it exists in the "passwd" map
-	local pwd = webnis.map_lookup(req, "passwd", "name", username)
+	local pwd = webnis.map_lookup(req, "passwd", "username", username)
 	if pwd == nil then
 		dprintf("map_email: %s user unknown", username)
 		return nil
@@ -88,7 +88,7 @@ function auth_example(req)
 	dprint("auth ok")
 	-- auth OK, build reply.
 	if email == nil then
-		local m = webnis.map_lookup(req, "email", "user", username)
+		local m = webnis.map_lookup(req, "email", "username", username)
 		if m ~= nil then
 			email = m.email
 		end

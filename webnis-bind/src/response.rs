@@ -30,18 +30,18 @@ pub enum ResponseVariants<'a> {
 
 #[derive(Serialize,Deserialize)]
 pub struct Passwd<'a> {
-    name:       &'a str,
+    username:   &'a str,
     passwd:     &'a str,
     uid:        uid_t,
     gid:        gid_t,
     gecos:      &'a str,
-    dir:        &'a str,
+    home:       &'a str,
     shell:      &'a str,
 }
 
 #[derive(Serialize,Deserialize)]
 pub struct Group<'a> {
-    name:       &'a str,
+    group:      &'a str,
     passwd:     &'a str,
     gid:        gid_t,
     members:    Vec<&'a str>,
@@ -49,7 +49,7 @@ pub struct Group<'a> {
 
 #[derive(Serialize,Deserialize)]
 pub struct Gidlist<'a> {
-    name:       &'a str,
+    username:   &'a str,
     gidlist:    Vec<gid_t>,
 }
 
@@ -104,14 +104,14 @@ impl<'a> Response<'a> {
 
 impl<'a> Passwd<'a> {
     pub fn to_line(&self) -> String {
-        format!("200 {}:{}:{}:{}:{}:{}:{}", self.name, self.passwd, self.uid, self.gid, self.gecos, self.dir, self.shell)
+        format!("200 {}:{}:{}:{}:{}:{}:{}", self.username, self.passwd, self.uid, self.gid, self.gecos, self.home, self.shell)
     }
 }
 
 impl<'a> Group<'a> {
     pub fn to_line(&self) -> String {
         let members = self.members.join(",");
-        format!("200 {}:{}:{}:{}", self.name, self.passwd, self.gid, members)
+        format!("200 {}:{}:{}:{}", self.group, self.passwd, self.gid, members)
     }
 }
 
@@ -119,7 +119,7 @@ impl<'a> Gidlist<'a> {
     pub fn to_line(&self) -> String {
         let gid_array = self.gidlist.iter().map(|m| m.to_string()).collect::<Vec<String>>();
         let gids = gid_array.iter().map(|s| s.as_str()).collect::<Vec<&str>>().join(",");
-        format!("200 {}:{}", self.name, gids)
+        format!("200 {}:{}", self.username, gids)
     }
 }
 
