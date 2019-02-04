@@ -25,7 +25,7 @@ GET /webnis/my.domain/map/passwd?name=mikevs
 HTTP/1.1 200 OK
 Content-Type: application/json
 
-{"result":{"dir":"/home/mikevs","gecos":"","gid":1000,"passwd":"x","shell":"/bin/sh","uid":1000,"user":"mikevs"}}
+{"result":{"home":"/home/mikevs","gecos":"","gid":1000,"passwd":"x","shell":"/bin/sh","uid":1000,"username":"mikevs"}}
 ```
 
 As you can see the reply format is loosely based on JSONRPC.
@@ -33,11 +33,11 @@ As you can see the reply format is loosely based on JSONRPC.
 A couple of examples (you can define as many maps as you like):
 
 ```
-GET <BASE>/<DOMAIN>/map/passwd?name=<name>
+GET <BASE>/<DOMAIN>/map/passwd?username=<name>
 GET <BASE>/<DOMAIN>/map/passwd?uid=<number>
-GET <BASE>/<DOMAIN>/map/group?name=<name>
+GET <BASE>/<DOMAIN>/map/group?group=<name>
 GET <BASE>/<DOMAIN>/map/group?gid=<number>
-GET <BASE>/<DOMAIN>/map/gidlist?name=<name>
+GET <BASE>/<DOMAIN>/map/gidlist?username=<name>
 POST <BASE>/<DOMAIN>/auth
 ```
 

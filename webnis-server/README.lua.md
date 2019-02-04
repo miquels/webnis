@@ -14,7 +14,7 @@ functions to do map lookups and authentication. The functions are:
 ```
 let result = webnis.map_lookup(request, mapname, keyname, keyvalue)
 ```
-Looks up the `keyname`/`keyvalue` pair (e.g. `user=exampleuser`) in the map `mapname`.
+Looks up the `keyname`/`keyvalue` pair (e.g. `username=exampleuser`) in the map `mapname`.
 The return value is the result of the lookup or nil if it failed.
 
 ```
