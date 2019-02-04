@@ -48,11 +48,15 @@ fn local_lua_init() -> Option<LuaState> {
         },
     };
     let lua = Lua::new();
-    if let Err::<(), _>(e) = lua.exec(&lua_master.script, Some(lua_master.name.as_str())) {
+    if let Err::<(), _>(e) = lua.context(|ctx| {
+        let chunk = ctx.load(&lua_master.script);
+        let chunk = chunk.set_name(&lua_master.name)?;
+        chunk.exec()
+    }) {
         panic!("error loading lua script {}: {}", lua_master.name, e);
     }
 
-    set_webnis_table(&lua, lua_master.webnis.clone());
+    lua.context(|ctx| set_webnis_table(ctx, lua_master.webnis.clone()));
 
     Some(LuaState { lua: lua })
 }
@@ -64,10 +68,15 @@ pub(crate) fn lua_init(name: &str, webnis: Webnis) -> Result<(), Error> {
     let mut guard = LUA_MASTER.lock().unwrap();
     let script = std::fs::read_to_string(name).context(format!("opening {}", name))?;
     let lua = Lua::new();
-    if let Err::<(), _>(e) = lua.exec(&script, Some(name)) {
+    if let Err::<(), _>(e) = lua.context(|ctx| {
+        let chunk = ctx.load(&script);
+        let chunk = chunk.set_name(&name)?;
+        chunk.exec()
+    }) {
         merror!("parsing lua script:\n{}", e);
         Err(WnError::LuaError)?;
     }
+
     let lua_master = &mut *guard;
     *lua_master = Some(LuaMaster {
         name:   name.to_string(),
@@ -79,31 +88,31 @@ pub(crate) fn lua_init(name: &str, webnis: Webnis) -> Result<(), Error> {
 
 /// Recursively transform a serde_json::Value to a rlua::Value.
 /// This is surprisingly easy!
-fn json_value_to_lua<'a>(lua: &'a Lua, jv: serde_json::Value) -> rlua::Value<'a> {
+fn json_value_to_lua<'lua>(ctx: rlua::Context<'lua>, jv: serde_json::Value) -> rlua::Value<'lua> {
     match jv {
         serde_json::Value::Null => rlua::Nil,
-        serde_json::Value::Bool(b) => b.to_lua(lua).unwrap(),
+        serde_json::Value::Bool(b) => b.to_lua(ctx).unwrap(),
         serde_json::Value::Number(n) => {
             if let Some(n) = n.as_i64() {
-                n.to_lua(lua).unwrap()
+                n.to_lua(ctx).unwrap()
             } else if let Some(n) = n.as_f64() {
-                n.to_lua(lua).unwrap()
+                n.to_lua(ctx).unwrap()
             } else {
                 rlua::Nil
             }
         },
-        serde_json::Value::String(s) => s.to_lua(lua).unwrap(),
+        serde_json::Value::String(s) => s.to_lua(ctx).unwrap(),
         serde_json::Value::Array(a) => {
             a.into_iter()
-                .map(|e| json_value_to_lua(lua, e))
+                .map(|e| json_value_to_lua(ctx, e))
                 .collect::<Vec<_>>()
-                .to_lua(lua)
+                .to_lua(ctx)
                 .unwrap_or(rlua::Nil)
         },
         serde_json::Value::Object(o) => {
             let hm: HashMap<String, rlua::Value> =
-                HashMap::from_iter(o.into_iter().map(|(k, v)| (k, json_value_to_lua(lua, v))));
-            hm.to_lua(lua).unwrap_or(rlua::Nil)
+                HashMap::from_iter(o.into_iter().map(|(k, v)| (k, json_value_to_lua(ctx, v))));
+            hm.to_lua(ctx).unwrap_or(rlua::Nil)
         },
     }
 }
@@ -156,31 +165,33 @@ pub(crate) fn lua_map(
         let lua_state1 = &*lua_tls.borrow();
         let lua_state = lua_state1.as_ref().unwrap();
 
-        let globals = lua_state.lua.globals();
-        let w_obj: rlua::Table = match globals.get("webnis") {
-            Err(e) => {
-                merror!("lua_map: error setting global webnis table:\n{}", e);
-                return Err(WnError::LuaError);
-            },
-            Ok(o) => o,
-        };
-        w_obj.set("domain", domain).unwrap();
+        lua_state.lua.context(|ctx| {
+            let globals = ctx.globals();
+            let w_obj: rlua::Table = match globals.get("webnis") {
+                Err(e) => {
+                    merror!("lua_map: error setting global webnis table:\n{}", e);
+                    return Err(WnError::LuaError);
+                },
+                Ok(o) => o,
+            };
+            w_obj.set("domain", domain).unwrap();
 
-        let func: Function = match globals.get(mapname) {
-            Ok(f) => f,
-            Err(_e) => return Err(WnError::LuaFunctionNotFound),
-        };
+            let func: Function = match globals.get(mapname) {
+                Ok(f) => f,
+                Err(_e) => return Err(WnError::LuaFunctionNotFound),
+            };
 
-        let val = match func.call::<_, rlua::Value>((keyname, keyval)) {
-            Ok(v) => v,
-            Err(e) => {
-                merror!("lua_map: executing {}:\n{}", mapname, e);
-                return Err(WnError::LuaError);
-            },
-        };
+            let val = match func.call::<_, rlua::Value>((keyname, keyval)) {
+                Ok(v) => v,
+                Err(e) => {
+                    merror!("lua_map: executing {}:\n{}", mapname, e);
+                    return Err(WnError::LuaError);
+                },
+            };
 
-        let jv = lua_value_to_json(val);
-        Ok(jv)
+            let jv = lua_value_to_json(val);
+            Ok(jv)
+        })
     })
 }
 
@@ -230,74 +241,76 @@ pub(crate) fn lua_auth(
         let lua_state1 = &*lua_tls.borrow();
         let lua_state = lua_state1.as_ref().unwrap();
 
-        let globals = lua_state.lua.globals();
-        let w_obj: rlua::Table = match globals.get("webnis") {
-            Err(e) => {
-                merror!("lua_map: error setting global webnis table:\n{}", e);
-                return Err(WnError::LuaError);
-            },
-            Ok(o) => o,
-        };
-        w_obj.set("domain", domain).unwrap();
-
-        let func: Function = match globals.get(funcname) {
-            Ok(f) => f,
-            Err(_e) => return Err(WnError::LuaFunctionNotFound),
-        };
-
-        // function can return 0, 1 or 2 values.
-        let multival = match func.call::<_, rlua::MultiValue>(ai) {
-            Ok(v) => v,
-            Err(e) => {
-                merror!("lua_auth: executing {}:\n{}", funcname, e);
-                return Err(WnError::LuaError);
-            },
-        };
-        let mut vals = multival.into_iter();
-
-        // first value, if present, is the returned table.
-        let jv = vals
-            .next()
-            .map(|v| lua_value_to_json(v))
-            .unwrap_or(serde_json::Value::Null);
-
-        // second value, if present, is statuscode.
-        let code = {
-            match vals.next() {
-                Some(rlua::Value::Integer(n)) => {
-                    if n < 100 || n > 599 {
-                        merror!(
-                            "lua_auth: executing {}: status code out of range: {}\n",
-                            funcname,
-                            n
-                        );
-                        return Err(WnError::LuaError);
-                    }
-                    n as u16
-                },
-                Some(_) => {
-                    merror!("lua_auth: executing {}: status code not an integer\n", funcname);
+        lua_state.lua.context(|ctx| {
+            let globals = ctx.globals();
+            let w_obj: rlua::Table = match globals.get("webnis") {
+                Err(e) => {
+                    merror!("lua_map: error setting global webnis table:\n{}", e);
                     return Err(WnError::LuaError);
                 },
-                None => 0,
-            }
-        };
+                Ok(o) => o,
+            };
+            w_obj.set("domain", domain).unwrap();
 
-        Ok((jv, code))
+            let func: Function = match globals.get(funcname) {
+                Ok(f) => f,
+                Err(_e) => return Err(WnError::LuaFunctionNotFound),
+            };
+
+            // function can return 0, 1 or 2 values.
+            let multival = match func.call::<_, rlua::MultiValue>(ai) {
+                Ok(v) => v,
+                Err(e) => {
+                    merror!("lua_auth: executing {}:\n{}", funcname, e);
+                    return Err(WnError::LuaError);
+                },
+            };
+            let mut vals = multival.into_iter();
+
+            // first value, if present, is the returned table.
+            let jv = vals
+                .next()
+                .map(|v| lua_value_to_json(v))
+                .unwrap_or(serde_json::Value::Null);
+
+            // second value, if present, is statuscode.
+            let code = {
+                match vals.next() {
+                    Some(rlua::Value::Integer(n)) => {
+                        if n < 100 || n > 599 {
+                            merror!(
+                                "lua_auth: executing {}: status code out of range: {}\n",
+                                funcname,
+                                n
+                            );
+                            return Err(WnError::LuaError);
+                        }
+                        n as u16
+                    },
+                    Some(_) => {
+                        merror!("lua_auth: executing {}: status code not an integer\n", funcname);
+                        return Err(WnError::LuaError);
+                    },
+                    None => 0,
+                }
+            };
+
+            Ok((jv, code))
+        })
     })
 }
 
-fn set_webnis_table(lua: &Lua, webnis: Webnis) {
-    let table = lua.create_table().expect("failed to create table");
-    let globals = lua.globals();
+fn set_webnis_table(ctx: rlua::Context, webnis: Webnis) {
+    let table = ctx.create_table().expect("failed to create table");
+    let globals = ctx.globals();
 
     let map_lookup = {
         let webnis = webnis.clone();
-        lua.create_function(
-            move |lua, (mapname, keyname, keyvalue): (String, String, String)| {
+        ctx.create_function(
+            move |ctx, (mapname, keyname, keyvalue): (String, String, String)| {
                 // it gets a bit verbose when you want to log errors
                 // (as opposed to sending them up, which might be better..)
-                let w_obj: rlua::Table = match lua.globals().get("webnis") {
+                let w_obj: rlua::Table = match ctx.globals().get("webnis") {
                     Ok(w) => w,
                     Err(e) => {
                         warn!("map_lookup: get webnis global: {}", e);
@@ -312,7 +325,7 @@ fn set_webnis_table(lua: &Lua, webnis: Webnis) {
                     },
                 };
                 let v = match webnis.lua_map_lookup(&domain, &mapname, &keyname, &keyvalue) {
-                    Ok(jv) => json_value_to_lua(lua, jv),
+                    Ok(jv) => json_value_to_lua(ctx, jv),
                     Err(e) => {
                         warn!("map_lookup {} {}={}: {}", mapname, keyname, keyvalue, e);
                         rlua::Nil
@@ -329,12 +342,11 @@ fn set_webnis_table(lua: &Lua, webnis: Webnis) {
     //globals.set("webnis_map_lookup", map_lookup).unwrap();
 
     let map_auth = {
-        let webnis = webnis.clone();
-        lua.create_function(
-            move |lua, (mapname, keyname, username, password): (String, String, String, String)| {
+        ctx.create_function(
+            move |ctx, (mapname, keyname, username, password): (String, String, String, String)| {
                 // it gets a bit verbose when you want to log errors
                 // (as opposed to sending them up, which might be better..)
-                let w_obj: rlua::Table = match lua.globals().get("webnis") {
+                let w_obj: rlua::Table = match ctx.globals().get("webnis") {
                     Ok(w) => w,
                     Err(e) => {
                         warn!("map_lookup: get webnis global: {}", e);
@@ -349,7 +361,7 @@ fn set_webnis_table(lua: &Lua, webnis: Webnis) {
                     },
                 };
                 let v = match webnis.lua_map_auth(&domain, &mapname, &keyname, &username, &password) {
-                    Ok(jv) => json_value_to_lua(lua, JValue::Bool(jv)),
+                    Ok(jv) => json_value_to_lua(ctx, JValue::Bool(jv)),
                     Err(e) => {
                         warn!("map_auth {} {}={}: {}", mapname, keyname, username, e);
                         rlua::Nil
@@ -368,7 +380,7 @@ fn set_webnis_table(lua: &Lua, webnis: Webnis) {
     globals.set("webnis", table).expect("failed to set global webnis");
 
     // add a debugging function.
-    let dprint = lua
+    let dprint = ctx
         .create_function(|_, data: String| {
             debug!("{}", data);
             Ok(())
