@@ -67,9 +67,15 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
         // the client (webnis-pam), we do not have to encode again.
         let path = format!("/{}/auth",
                         utf8_percent_encode(&ctx.config.domain, DEFAULT_ENCODE_SET));
-        let body = format!("username={}&password={}",
+        let mut body = format!("username={}&password={}",
                         utf8_percent_encode(&request.args[0], QUERY_ENCODE_SET),
                         request.args[1]);
+        if request.args.len() > 2 {
+            body.push_str(&format!("&service={}", utf8_percent_encode(&request.args[2], QUERY_ENCODE_SET)));
+        }
+        if request.args.len() > 3 {
+            body.push_str(&format!("&remote={}", utf8_percent_encode(&request.args[3], QUERY_ENCODE_SET)));
+        }
         return req_with_retries(&ctx, path, authorization, Some(body), 1)
     }
 
@@ -301,25 +307,29 @@ fn tolower<'a>(s: &'a str, buf: &'a mut [u8]) -> &'a str {
 
 impl<'a> Request<'a> {
     pub fn parse(input: &'a str) -> Result<Request<'a>, String> {
-        let mut parts = input.splitn(3, " ");
+        let mut parts = input.splitn(5, " ");
         let mut buf = [0u8; 16];
 	    let c = match parts.next() {
 		    None => return Err("NO".to_owned()),
             Some(c) => tolower(c, &mut buf),
         };
         let args = parts.collect::<Vec<_>>();
-        let (cmd, nargs) = match c {
-            "auth" => (Cmd::Auth, 2),
-            "getpwnam" => (Cmd::GetPwNam, 1),
-            "getpwuid" => (Cmd::GetPwUid, 1),
-            "getgrnam" => (Cmd::GetGrNam, 1),
-            "getgrgid" => (Cmd::GetGrGid, 1),
-            "getgidlist" => (Cmd::GetGidList, 1),
-            "servers" => (Cmd::GetGidList, 0),
+        let (cmd, argsmin, argsmax) = match c {
+            "auth" => (Cmd::Auth, 2, 4),
+            "getpwnam" => (Cmd::GetPwNam, 1, 1),
+            "getpwuid" => (Cmd::GetPwUid, 1, 1),
+            "getgrnam" => (Cmd::GetGrNam, 1, 1),
+            "getgrgid" => (Cmd::GetGrGid, 1, 1),
+            "getgidlist" => (Cmd::GetGidList, 1, 1),
+            "servers" => (Cmd::GetGidList, 0, 0),
             _ => return Err(format!("unknown command {}", c)),
         };
-        if nargs != args.len() {
-            return Err(format!("{} needs {} arguments", c, nargs));
+        if args.len() < argsmin || args.len() > argsmax {
+            if argsmin == argsmax {
+                return Err(format!("{} needs {} arguments", c, argsmin));
+            } else {
+                return Err(format!("{} needs {}-{} arguments", c, argsmin, argsmax));
+            }
         }
         let arg0 = if cmd == Cmd::GetPwUid || cmd == Cmd::GetGrGid {
             match args[0].parse::<u32>() {

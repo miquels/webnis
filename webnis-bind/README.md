@@ -35,7 +35,7 @@ nc -N -U /var/run/webnis-bind.sock
 The request to the webnis server is a simple HTTPS request, like:
 
 ```
-GET /webnis/passwd?name=mikevs
+GET /.well-known/webnis/default/map/passwd?name=mikevs
 HTTP/1.1 200 OK
 Content-Type: application/json
 
@@ -49,21 +49,27 @@ discovered the [json crate](https://crates.io/crates/json) which is much smaller
 
 Try it yourself:
 ```
-curl -i https://<WEBNISSERVER>/.well-known/webnis/default/passwd?name=stuser
+curl -i https://<WEBNISSERVER>/.well-known/webnis/default/map/passwd?name=stuser
 ```
 
 Currently implemented are:
 
 ```
-GETPWNAM <name>		GET <BASE>/<DOMAIN>/map/passwd?name=<name>
-GETPWUID <uid>		GET <BASE>/<DOMAIN>/map/passwd?uid=<number>
-GETGRNAM <name>		GET <BASE>/<DOMAIN>/map/group?name=<name>
-GETGRGID <gid>		GET <BASE>/<DOMAIN>/map/group?gid=<number>
-GETGIDLIST <name>	GET <BASE>/<DOMAIN>/map/gidlist?name=<name>
-AUTH <name> <passwd>	POST <BASE>/<DOMAIN>/auth
+GETPWNAM <name>				GET <BASE>/<DOMAIN>/map/passwd?name=<name>
+GETPWUID <uid>				GET <BASE>/<DOMAIN>/map/passwd?uid=<number>
+GETGRNAM <name>				GET <BASE>/<DOMAIN>/map/group?name=<name>
+GETGRGID <gid>				GET <BASE>/<DOMAIN>/map/group?gid=<number>
+GETGIDLIST <name>			GET <BASE>/<DOMAIN>/map/gidlist?name=<name>
+AUTH <name> <passwd> [service] [remote]	POST <BASE>/<DOMAIN>/auth
 ```
 
 `<BASE>` defaults to `/.well-known/webnis`, and `<DOMAIN>` defaults to .... `default`.
 
 The `<passwd>` in AUTH needs to be percent-encoded by the client.
+
+Service and remote are optional. Service is the name of the service querying the
+webnis server. Webnis-pam sets this to the PAM service. Remote is the remote
+IP address of a client, with an optional :port, If that is applicable. So without
+a port for IPv4 and IPv6 respectively: **192.168.158.23**, **2001:db8:42::2**.
+With a port: **192.168.158.23:2884**, **[2001:db8:42::2]:2884** .
 
