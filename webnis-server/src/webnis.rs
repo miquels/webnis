@@ -213,22 +213,27 @@ impl Webnis {
     }
 
     // look something up in a map.
-    pub fn handle_map(&self, domain: &str, map: &str, query: &HashMap<String, String>) -> HttpResponse {
+    pub fn handle_map(&self, domain: &str, map: &str, keyname: Option<&str>, query: &HashMap<String, String>) -> HttpResponse {
         // lookup domain in config
         let domain = match self.inner.config.find_domain(&domain) {
             None => return json_error(StatusCode::BAD_REQUEST, None, "Domain not found"),
             Some(d) => d,
         };
 
-        // Simply use the first query parameter.
-        let (keyname, keyval) = match query.iter().next() {
-            None => return json_error(StatusCode::BAD_REQUEST, None, "Query params missing"),
-            Some(kv) => kv,
+        // The keyname is passed in by the caller.
+        // It simply is the first query parameter in the list.
+        let (keyname, keyval) = match keyname {
+            Some(k) => match query.get(k) {
+                Some(v) => (k, v),
+                None => return json_error(StatusCode::BAD_REQUEST, None, "query params garbled"),
+            },
+            None => return json_error(StatusCode::BAD_REQUEST, None, "query params missing"),
         };
 
         // find the map
+        debug!("webnis.handle_map: domain [{}] map [{}] keyname [{}]", domain.name, map, keyname);
         let (map, keyname) = match self.inner.config.find_allowed_map(&domain, map, keyname) {
-            None => return json_error(StatusCode::NOT_FOUND, None, "No such map"),
+            None => return json_error(StatusCode::NOT_FOUND, None, "No such map/keyname combo"),
             Some(m) => m,
         };
 

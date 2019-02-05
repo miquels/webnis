@@ -217,7 +217,9 @@ fn handle_map(req: &HttpRequest<Webnis>) -> HttpResponse {
     if let Some(denied) = check_authorization(req, &params.0) {
         return denied;
     }
-    req.state().handle_map(&params.0, &params.1, &req.query())
+    let keyname = req.query_string().split('=').next();
+    debug!("handle_map: [{}] [{}] [{:?}]", params.0, params.1, req.query());
+    req.state().handle_map(&params.0, &params.1, keyname, &req.query())
 }
 
 fn handle_info(req: &HttpRequest<Webnis>) -> HttpResponse {
