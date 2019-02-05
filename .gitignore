@@ -5,3 +5,11 @@
 *.tar.xz
 *.buildinfo
 *.changes
+*/debian/.debhelper
+*/debian/*-stamp
+*/debian/*.debhelper
+*/debian/*.substvars
+*/debian/*.log
+*/debian/files
+*/debian/*/
+!*/debian/source
