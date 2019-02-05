@@ -1,5 +1,5 @@
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use std::os::unix::net::UnixStream;
 use std::io::{BufRead,BufReader};
 use std::thread::sleep;
@@ -9,9 +9,9 @@ use super::nss::{Passwd,Group,uid_t,gid_t,NssResult,NssError};
 
 static SOCKADDR: &'static str = "/var/run/webnis-bind.sock";
 
-const MAX_TRIES: u32 = 2;
-const RETRY_DELAY_MS: u64 = 2500;
-const REQUEST_READ_TIMEOUT_MS: u64 = 2500;
+const MAX_TIMEOUT_MS: u64 = 2000;
+const RETRY_DELAY_MS: u64 = 500;
+const REQUEST_READ_TIMEOUT_MS: u64 = 1500;
 const REQUEST_WRITE_TIMEOUT_MS: u64 = 1000;
 
 pub struct Webnis;
@@ -48,6 +48,10 @@ impl Webnis {
         let reply = wnbind_get("getpwuid", &uid.to_string())?;
         decode_passwd(pwd, reply)
     }
+}
+
+fn duration_millis(d: &Duration) -> u64 {
+    d.as_secs() + (d.subsec_millis() as u64)
 }
 
 // open socket, send one command, read reply, return.
@@ -99,7 +103,7 @@ fn wnbind_try(cmd: &str, arg: &str) -> NssResult<String> {
         404 => Err(NssError::NotFound),
         400 ... 499 => {
             debug!("error: {}", line);
-            Err(NssError::TryAgain)
+            Err(NssError::TryAgainLater)
         },
         _ => {
             debug!("error: {}", line);
@@ -110,7 +114,13 @@ fn wnbind_try(cmd: &str, arg: &str) -> NssResult<String> {
 
 // call cmd_run and sleep/retry a few times if we fail.
 fn wnbind_get(cmd: &str, arg: &str) -> NssResult<String> {
-    for tries in 0 .. MAX_TRIES {
+    let now = SystemTime::now();
+    loop {
+        if let Ok(elapsed) = now.elapsed() {
+            if duration_millis(&elapsed) > MAX_TIMEOUT_MS {
+                return Err(NssError::TryAgainLater);
+            }
+        }
         match wnbind_try(cmd, arg) {
             Ok(r) => {
                 if r.contains(0 as char) {
@@ -120,15 +130,19 @@ fn wnbind_get(cmd: &str, arg: &str) -> NssResult<String> {
                 return Ok(r);
             },
             res @ Err(NssError::NotFound) => return res,
+            res @ Err(NssError::TryAgainLater) => return res,
+            res @ Err(NssError::InsufficientBuffer) => return res,
+            res @ Err(NssError::Unavailable) => return res,
             Err(NssError::TimedOut) => {},
-            _ => {
-                if tries < MAX_TRIES - 1 {
-                    sleep(Duration::from_millis(RETRY_DELAY_MS));
+            Err(NssError::TryAgainNow) => {
+                if let Ok(elapsed) = now.elapsed() {
+                    if duration_millis(&elapsed) + RETRY_DELAY_MS < MAX_TIMEOUT_MS {
+                        sleep(Duration::from_millis(RETRY_DELAY_MS));
+                    }
                 }
             },
         }
     }
-    Err(NssError::Unavailable)
 }
 
 // decode passwd line

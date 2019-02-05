@@ -222,8 +222,10 @@ pub enum NssError {
     NotFound,
     // Something went permanently wrong.
     Unavailable,
-    // Something went temporarily wrong.
-    TryAgain,
+    // Something went temporarily wrong. Try again at a later time.
+    TryAgainLater,
+    // Something went temporarily wrong. Try again in a second or so.
+    TryAgainNow,
     // Timed out.
     TimedOut,
 }
@@ -239,6 +241,12 @@ impl From<std::io::Error> for NssError {
         match e.kind() {
             std::io::ErrorKind::TimedOut|
             std::io::ErrorKind::Interrupted => NssError::TimedOut,
+            std::io::ErrorKind::ConnectionRefused|
+            std::io::ErrorKind::ConnectionReset|
+            std::io::ErrorKind::ConnectionAborted |
+            std::io::ErrorKind::NotConnected|
+            std::io::ErrorKind::BrokenPipe|
+            std::io::ErrorKind::UnexpectedEof => NssError::TryAgainNow,
 		    _ => NssError::Unavailable,
         }
     }
@@ -249,7 +257,8 @@ fn nss_error(err: NssError, errnop: *mut i32) -> i32 {
         NssError::InsufficientBuffer => (ERANGE, NssStatus::TryAgain),
         NssError::NotFound => (ENOENT, NssStatus::NotFound),
         NssError::Unavailable => (EAGAIN, NssStatus::Unavailable),
-        NssError::TryAgain => (EAGAIN, NssStatus::TryAgain),
+        NssError::TryAgainLater => (EAGAIN, NssStatus::TryAgain),
+        NssError::TryAgainNow => (EAGAIN, NssStatus::TryAgain),
         NssError::TimedOut => (ETIMEDOUT, NssStatus::TryAgain),
     };
     unsafe { *errnop = errno };
