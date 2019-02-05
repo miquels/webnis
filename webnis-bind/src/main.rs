@@ -83,10 +83,14 @@ fn main() {
         gid:            0xfffffffe,
     };
 
+    // first set umask so that anyone can connect to the socket we're about to create.
+    let saved_umask = unsafe { libc::umask(0o111) };
+
     // Get a UNIX stream listener.
 	let listener = match UnixListener::bind(&listen) {
         Ok(m) => Ok(m),
         Err(ref e) if e.kind() == io::ErrorKind::AddrInUse => {
+            // old socket laying around, get rid of it. then try again.
             fs::remove_file(&listen).map_err(|e| {
                 eprintln!("{}: {}: {}", PROGNAME, listen, e);
                 exit(1);
@@ -98,6 +102,10 @@ fn main() {
         eprintln!("{}: {}: {}", PROGNAME, listen, e);
         exit(1);
     }).unwrap();
+
+    // restore umask to whatever wildly insane insecure value it was before.
+    unsafe { libc::umask(saved_umask) };
+
     println!("{}: listening on: {}", PROGNAME, listen);
 
     let server = listener.incoming()

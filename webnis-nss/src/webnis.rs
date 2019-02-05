@@ -100,6 +100,8 @@ fn wnbind_try(cmd: &str, arg: &str) -> NssResult<String> {
         200 ... 299 => {
             Ok(val.to_string())
         },
+        401 => Err(NssError::Unavailable),
+        403 => Err(NssError::Unavailable),
         404 => Err(NssError::NotFound),
         400 ... 499 => {
             debug!("error: {}", line);
