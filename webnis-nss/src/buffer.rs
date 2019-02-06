@@ -218,7 +218,7 @@ impl Passwd {
         unsafe { (*self.pwd).pw_uid = uid; }
     }
 
-    /// set user id.
+    /// set group id.
     pub fn set_gid(&mut self, gid: gid_t) {
         unsafe { (*self.pwd).pw_gid = gid; }
     }

@@ -1,6 +1,7 @@
 // This file contains the raw _libnss_* ffi entrance points
 use std;
 use std::ffi::CStr;
+use std::cell::RefCell;
 
 use libc;
 use libc::{c_void, c_char, size_t, group, passwd};
@@ -11,8 +12,14 @@ pub use libc::{uid_t, gid_t};
 
 use super::webnis::Webnis;
 
+struct LastUid {
+    uid:        uid_t,
+    username:   String,
+}
+
 thread_local! {
-    static NSS: Webnis = Webnis::new();
+    static WEBNIS: Webnis = Webnis::new();
+    static LAST_UID: RefCell<Option<LastUid>> = RefCell::new(None);
 }
 
 /// NSS FFI entry point for _initgroups_dyn()
@@ -53,7 +60,7 @@ pub extern "C" fn _nss_webnis_initgroups_dyn(name: *const c_char,
     };
     debug!("libnss-webnis initgroups_dyn called for {}", name);
 
-    let user_gids = match NSS.with(|nss| nss.getgidlist(name)) {
+    let user_gids = match WEBNIS.with(|webnis| webnis.getgidlist(name)) {
         Ok(gids) => gids,
         Err(e) => return nss_error(e, errnop),
     };
@@ -124,12 +131,12 @@ pub extern "C" fn _nss_webnis_getgrnam_r(name: *const c_char,
     };
     debug!("libnss-webnis getgrnam_r called for {}", name);
 
-    let group = match Group::new(result, buffer, buflen) {
+    let mut group = match Group::new(result, buffer, buflen) {
         Ok(g) => g,
         Err(e) => return nss_error(e, errnop),
     };
 
-    let res = NSS.with(|nss| nss.getgrnam(group, name));
+    let res = WEBNIS.with(|webnis| webnis.getgrnam(&mut group, name));
     return nss_result(res, errnop);
 }
 
@@ -145,12 +152,12 @@ pub extern "C" fn _nss_webnis_getgrgid_r(gid: gid_t,
     assert!(!result.is_null() && !buffer.is_null() && !errnop.is_null());
     debug!("libnss-webnis getgrgid_r called for {}", gid);
 
-    let group = match Group::new(result, buffer, buflen) {
+    let mut group = match Group::new(result, buffer, buflen) {
         Ok(g) => g,
         Err(e) => return nss_error(e, errnop),
     };
 
-    let res = NSS.with(|nss| nss.getgrgid(group, gid));
+    let res = WEBNIS.with(|webnis| webnis.getgrgid(&mut group, gid));
     return nss_result(res, errnop);
 }
 
@@ -171,12 +178,24 @@ pub extern "C" fn _nss_webnis_getpwnam_r(name: *const c_char,
     };
     debug!("libnss-webnis getpwnam_r called for {}", name);
 
-    let passwd = match Passwd::new(result, buffer, buflen) {
+    let mut passwd = match Passwd::new(result, buffer, buflen) {
         Ok(g) => g,
         Err(e) => return nss_error(e, errnop),
     };
 
-    let res = NSS.with(|nss| nss.getpwnam(passwd, name));
+    let res = WEBNIS.with(|webnis| webnis.getpwnam(&mut passwd, name));
+
+    // Cache the last username -> uid lookup in thread-local storage.
+    // If the next call is a uid -> username lookup we can use this
+    // knowledge (see getpwuid_r).
+    if res.is_ok() {
+        LAST_UID.with(|lastuid| {
+            *lastuid.borrow_mut() = Some(LastUid{
+                username:   name.to_string(),
+                uid:        unsafe{ (*result).pw_uid },
+            });
+        });
+    }
     return nss_result(res, errnop);
 }
 
@@ -192,12 +211,28 @@ pub extern "C" fn _nss_webnis_getpwuid_r(uid: uid_t,
     assert!(!result.is_null() && !buffer.is_null() && !errnop.is_null());
     debug!("libnss-webnis getpwuid_r called for {}", uid);
 
-    let passwd = match Passwd::new(result, buffer, buflen) {
+    let mut passwd = match Passwd::new(result, buffer, buflen) {
         Ok(p) => p,
         Err(e) => return nss_error(e, errnop),
     };
 
-    let res = NSS.with(|nss| nss.getpwuid(passwd, uid));
+    // do a standard lookup by uid.
+    let res = WEBNIS.with(|webnis| webnis.getpwuid(&mut passwd, uid));
+    if res.is_ok() {
+        return nss_result(res, errnop);
+    }
+
+    // the lookup by uid failed. see if our last lookup by name had the
+    // same uid. if so, try a lookup by name.
+    let res = LAST_UID.with(|lastuid| {
+        if let Some(lastuid) = &*lastuid.borrow() {
+            if lastuid.uid == uid {
+                passwd.reset();
+                return WEBNIS.with(|webnis| webnis.getpwnam(&mut passwd, &lastuid.username));
+            }
+        }
+        res
+    });
     return nss_result(res, errnop);
 }
 

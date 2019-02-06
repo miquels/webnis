@@ -29,22 +29,22 @@ impl Webnis {
         decode_gidlist(reply)
     }
 
-    pub fn getgrnam(&self, grp: Group, name: &str) -> NssResult<()> {
+    pub fn getgrnam(&self, grp: &mut Group, name: &str) -> NssResult<()> {
         let reply = wnbind_get("getgrnam", name)?;
         decode_group(grp, reply)
     }
 
-    pub fn getgrgid(&self, grp: Group, gid: gid_t) -> NssResult<()> {
+    pub fn getgrgid(&self, grp: &mut Group, gid: gid_t) -> NssResult<()> {
         let reply = wnbind_get("getgrgid", &gid.to_string())?;
         decode_group(grp, reply)
     }
 
-    pub fn getpwnam(&self, pwd: Passwd, name: &str) -> NssResult<()> {
+    pub fn getpwnam(&self, pwd: &mut Passwd, name: &str) -> NssResult<()> {
         let reply = wnbind_get("getpwnam", name)?;
         decode_passwd(pwd, reply)
     }
 
-    pub fn getpwuid(&self, pwd: Passwd, uid: uid_t) -> NssResult<()> {
+    pub fn getpwuid(&self, pwd: &mut Passwd, uid: uid_t) -> NssResult<()> {
         let reply = wnbind_get("getpwuid", &uid.to_string())?;
         decode_passwd(pwd, reply)
     }
@@ -148,7 +148,7 @@ fn wnbind_get(cmd: &str, arg: &str) -> NssResult<String> {
 }
 
 // decode passwd line
-fn decode_passwd(mut pwd: Passwd, line: String) -> NssResult<()> {
+fn decode_passwd(pwd: &mut Passwd, line: String) -> NssResult<()> {
 
     // let's be anal about this.
     let fields : Vec<&str> = line.split(':').collect();
@@ -186,7 +186,7 @@ fn decode_passwd(mut pwd: Passwd, line: String) -> NssResult<()> {
 }
 
 // decode group line
-fn decode_group(mut grp: Group, line: String) -> NssResult<()> {
+fn decode_group(grp: &mut Group, line: String) -> NssResult<()> {
 
     // let's be anal about this.
     let fields : Vec<&str> = line.split(':').collect();
