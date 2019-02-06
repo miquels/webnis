@@ -17,7 +17,7 @@
 # - find the [[domain]] from the client's request URL
 # - the domain has a authorization password. check it.
 # - the domain has an "auth" key, it points to an "auth" section
-#   e.g. auth = "xs4all" -> [auth.xs4all].
+#   e.g. auth = "adjunct" -> [auth.adjunct].
 # - the auth section tells the server what map to use, and the key
 #   to use for the username lookup.
 # - if an entry is found, and it has a "passwd" field with an encrypted
@@ -30,8 +30,8 @@
   listen = [ "0.0.0.0:3245", "[::]:3245" ]
   # if tls is enabled, key_file and crt_file must be set as well.
   tls = true
-  key_file = "/etc/ssl/private/wildcard.xs4all.net.key"
-  crt_file = "/etc/ssl/certs/wildcard.xs4all.net.crt"
+  key_file = "/etc/ssl/private/wildcard.example.com.key"
+  crt_file = "/etc/ssl/certs/wildcard.example.com.crt"
 
 # putting a lua script name here enables LUA scripting.
 [lua]
@@ -39,7 +39,7 @@
 
 # multiple domains can be configured.
 [[domain]]
-  name = "xs4all"
+  name = "business"
   # HTTP authorization. Set like this, it is Basic Authentication.
   # Other variations are possible (like an X-Api-Key schema).
   http_authschema = "Basic"
@@ -47,7 +47,7 @@
   http_authencoding = "base64"
   # database directory of the maps. this can be different per domain.
   # we use the legacy NIS directory in this example.
-  db_dir = "/var/yp/xs4all.nl"
+  db_dir = "/var/yp/example.com"
   # the maps that a client is allowed to do a lookup in.
   maps = [ "passwd", "group", "gidlist", "lua_example" ]
   # the [auth] section to use when a client wants to check a username/password.
@@ -56,10 +56,10 @@
 # Another domain. This one serves different data (note the db_dir setting)
 # and only two maps, the "passwd" and the "group" map.
 [[domain]]
-  name = "shell.xs4all.nl"
+  name = "support"
   http_authschema = "X-Api-Key"
   http_authtoken = "679865536768646"
-  db_dir = "/var/yp/shell.xs4all.nl"
+  db_dir = "/var/yp/support.example.com"
   maps = [ "passwd", "group" ]
   auth = "adjunct"
 
