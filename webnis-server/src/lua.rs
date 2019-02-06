@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::iter::FromIterator;
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 use std::sync::Mutex;
 
 use failure::ResultExt;
@@ -58,13 +60,13 @@ fn local_lua_init() -> LuaState {
 /// Read the lua script from a file, and evaluate it. If it does evaluate
 /// without errors, store the filename and the script so that we can later
 /// create per-thread instances.
-pub(crate) fn lua_init(name: &str) -> Result<(), Error> {
+pub(crate) fn lua_init(filename: &Path) -> Result<(), Error> {
     let mut guard = LUA_MASTER.lock().unwrap();
-    let script = std::fs::read_to_string(name).context(format!("opening {}", name))?;
+    let script = std::fs::read_to_string(filename).context(format!("opening {:?}", filename))?;
     let lua = Lua::new();
     if let Err::<(), _>(e) = lua.context(|ctx| {
         let chunk = ctx.load(&script);
-        let chunk = chunk.set_name(&name)?;
+        let chunk = chunk.set_name(filename.as_os_str().as_bytes())?;
         chunk.exec()
     }) {
         merror!("parsing lua script:\n{}", e);
@@ -73,7 +75,7 @@ pub(crate) fn lua_init(name: &str) -> Result<(), Error> {
 
     let lua_master = &mut *guard;
     *lua_master = Some(LuaMaster {
-        name:   name.to_string(),
+        name:   filename.to_string_lossy().to_string(),
         script: script,
     });
     Ok(())
@@ -342,12 +344,11 @@ fn set_globals(ctx: rlua::Context, webnis: Webnis) {
 
     let map_auth = {
         ctx.create_function(
-            move |ctx, (req, mapname, keyname): (rlua::AnyUserData, String, String)| {
+            move |ctx, (req, mapname, keyname, username): (rlua::AnyUserData, String, String, String)| {
                 let req = match req.borrow::<Request>() {
                     Ok(r) => r,
                     Err(e) => return Err(e),
                 };
-                let username = req.username.as_ref().ok_or(rlua::Error::RuntimeError("username not set".into()))?;
                 let password = req.password.as_ref().ok_or(rlua::Error::RuntimeError("password not set".into()))?;
                 let v = match webnis.lua_map_auth(&req.domain, &mapname, &keyname, &username, &password) {
                     Ok(jv) => json_value_to_lua(ctx, JValue::Bool(jv)),

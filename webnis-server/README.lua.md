@@ -18,11 +18,11 @@ Looks up the `keyname`/`keyvalue` pair (e.g. `username=exampleuser`) in the map 
 The return value is the result of the lookup or nil if it failed.
 
 ```
-let result = webnis.map_auth(request, mapname, keyname)
+let result = webnis.map_auth(request, mapname, keyname, keyvalue)
 ```
-Looks up the `keyname`/`request.username` pair in the map `mapname`. If
-present, and the returned object has a member `password`, `request.password`
-is checked against that.
+Looks up the `keyname`/`keyvalue` pair in the map `mapname`. This is usually
+`"username"`,`request.username`. If found, and the returned object has a
+member `password`, `request.password` is checked against that.
 
 Notice that in both cases the `request` table is passed in as the
 first argument. This is because the `request` contains context information
@@ -35,9 +35,9 @@ Authentication
 result = auth_function(request)
 returnobject,status = auth_function(request)
 ```
-The passed in `request` table contains a `request.username` and a
-`request.password`. These are the username/password query parameters passed
-in in the POST body of the request.  It also contains a `request.domain`
+The `request` argument is a table that contains a `request.username` and a
+`request.password`. These are the username/password query parameters sent
+in the POST body of the request.  It also contains a `request.domain`
 value which is the webnis domain for this request.  Any additional query
 parameters are also available (for example, `service` or `remote`).
 
@@ -61,8 +61,8 @@ Map lookups
 result = lookup_function(request)
 ```
 
-The `request` argument contains a `request.keyname` and a `request.keyvalue`.
-You usually use `webnis.map_lookup()` with these.
+The `request` argument is a table that contains a `request.keyname`
+and a `request.keyvalue`. You usually use `webnis.map_lookup()` with these.
 
 Return value
 ------------

@@ -38,6 +38,8 @@ pub struct Server {
     pub listen: OneOrManyAddr,
     #[serde(default)]
     pub securenets: Vec<String>,
+    #[serde(skip)]
+    pub securenets_: Vec<PathBuf>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -95,6 +97,8 @@ pub struct Map {
 #[derive(Deserialize, Debug, Clone)]
 pub struct LuaConfig {
     pub script: String,
+    #[serde(skip)]
+    pub script_: PathBuf,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -142,6 +146,13 @@ fn map_inherit(key: &str, map: &Map, base: &Map) -> Map {
     }
 }
 
+fn abs_path(toml_file: &Path, file: &str) -> PathBuf {
+    match toml_file.parent() {
+        Some(parent) => parent.join(Path::new(file)),
+        None => PathBuf::from(file),
+    }
+}
+
 // Read the TOML config into a config::Condig struct.
 pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
     let buffer = std::fs::read_to_string(&toml_file)?;
@@ -175,6 +186,15 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
             config.map.insert(name, map);
         }
     }
+
+    // Resolve non-absolute paths.
+    for file in &config.server.securenets {
+        config.server.securenets_.push(abs_path(toml_file.as_ref(), file));
+    }
+    if let Some(ref mut lua) = config.lua {
+        lua.script_ = abs_path(toml_file.as_ref(), &lua.script);
+    }
+
     // Build the `map_ `HashMap.
     for (k, v) in config.map.iter() {
         //

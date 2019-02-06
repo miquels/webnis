@@ -11,7 +11,7 @@ function dprintf(...) dprint(string.format(...)) end
 function map_example(req)
 
 	-- maps to rust debug! facility
-	dprintf("lua map_email: keyname %s, keyval %s", req.keyname, req.keyvalue)
+	dprintf("lua map_example: keyname %s, keyvalue %s", req.keyname, req.keyvalue)
 
 	local email
 	local username = req.keyvalue
@@ -79,8 +79,8 @@ function auth_example(req)
 	end
 
 	-- authenticate
-	dprintf("going to auth [%s] [%s] [%s] [x]", "adjunct", "name", username)
-	if not webnis.map_auth(req, "adjunct", "name", username, password) then
+	dprintf("going to auth [%s] [%s] [%s] [x]", "adjunct", "username", username)
+	if not webnis.map_auth(req, "adjunct", "username", username) then
 		dprintf("%s: bad password", username)
 		return nil
 	end

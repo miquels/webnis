@@ -74,11 +74,11 @@ fn main() {
     }
 
     // read /etc/ypserv.securenets if configured.
-    let securenets = if config.server.securenets.len() > 0 {
+    let securenets = if config.server.securenets_.len() > 0 {
         let mut iplist = IpList::new();
-        for file in &config.server.securenets {
-            if let Err(e) = config::read_securenets(&file, &mut iplist) {
-                eprintln!("{}: {}: {}", PROGNAME, file, e);
+        for file in &config.server.securenets_ {
+            if let Err(e) = config::read_securenets(file, &mut iplist) {
+                eprintln!("{}: {:?}: {}", PROGNAME, file, e);
                 exit(1);
             }
         }
@@ -95,8 +95,8 @@ fn main() {
 
     // initialize lua stuff
     if let Some(ref l) = config.lua {
-        if let Err(e) = lua::lua_init(&l.script) {
-            eprintln!("{}: {} {}", PROGNAME, l.script, e);
+        if let Err(e) = lua::lua_init(&l.script_) {
+            eprintln!("{}: {:?} {}", PROGNAME, l.script_, e);
             exit(1);
         }
     }
