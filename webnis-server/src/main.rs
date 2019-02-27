@@ -55,11 +55,13 @@ fn main() {
     env_logger::init();
 
     let matches = clap_app!(webnis_server =>
-        (version: "0.1")
+        (version: "0.3")
         (@arg CFG: -c --config +takes_value "configuration file (/etc/webnis-server.toml)")
+        (@arg SYN: -x --syntaxcheck "syntax check configuration files")
     )
     .get_matches();
     let cfg = matches.value_of("CFG").unwrap_or("/etc/webnis-server.toml");
+    let syntax = matches.is_present("SYN");
 
     let config = match config::read(cfg) {
         Err(e) => {
@@ -99,6 +101,11 @@ fn main() {
             eprintln!("{}: {:?} {}", PROGNAME, l.script_, e);
             exit(1);
         }
+    }
+
+    if syntax {
+        println!("configuration parsed succesfully");
+        exit(0);
     }
 
     let sys = actix::System::new("webnis");

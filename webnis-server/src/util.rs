@@ -6,7 +6,7 @@ use actix_web::http::StatusCode;
 use actix_web::HttpResponse;
 
 use base64;
-use percent_encoding::{percent_decode, utf8_percent_encode, DEFAULT_ENCODE_SET};
+use percent_encoding::{percent_decode, utf8_percent_encode, PATH_SEGMENT_ENCODE_SET};
 use pwhash;
 use serde_json;
 
@@ -124,7 +124,7 @@ impl AuthInfo {
     pub fn from_post_body(body: &[u8], is_json: bool) -> Option<AuthInfo> {
         if is_json {
             if let Ok(mut ai) = serde_json::from_slice::<AuthInfo>(body) {
-                if let Cow::Owned(p) = utf8_percent_encode(&ai.password, DEFAULT_ENCODE_SET).into() {
+                if let Cow::Owned(p) = utf8_percent_encode(&ai.password, PATH_SEGMENT_ENCODE_SET).into() {
                     ai.password = p;
                 }
                 ai.extra.remove("password_raw");
