@@ -40,6 +40,7 @@ pub struct Server {
     pub securenets: Vec<String>,
     #[serde(skip)]
     pub securenets_: Vec<PathBuf>,
+    pub datalog: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

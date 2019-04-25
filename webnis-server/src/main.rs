@@ -11,6 +11,7 @@ extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
 
+pub(crate) mod datalog;
 #[macro_use]
 pub(crate) mod errors;
 pub(crate) mod config;
@@ -103,9 +104,23 @@ fn main() {
         }
     }
 
+    // initialize datalog stuff.
+    let _datalog_guard = match config.server.datalog {
+        Some(ref datalog) => {
+            match datalog::init(datalog) {
+                Ok(g) => Some(g),
+                Err(e) => {
+                    eprintln!("{}: {}: {}", PROGNAME, datalog, e);
+                    exit(1);
+                }
+            }
+        },
+        None => None,
+    };
+
     if syntax {
         println!("configuration parsed succesfully");
-        exit(0);
+        return;
     }
 
     let sys = actix::System::new("webnis");
