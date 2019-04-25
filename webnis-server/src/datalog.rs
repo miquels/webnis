@@ -7,6 +7,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::net::IpAddr;
 use std::os::unix::fs::MetadataExt;
+use std::str::FromStr;
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration,SystemTime,UNIX_EPOCH};
@@ -307,6 +308,29 @@ impl Datalog {
         // we're done.
         (request.as_slice().join(","), reply.as_slice().join(","))
     }
+
+    pub fn merge_rlua_table(&mut self, t: rlua::Table) -> Result<(), rlua::Error> {
+        if t.contains_key("username")? {
+            self.username = t.raw_get("username")?;
+        }
+        if let Some(ip) = t.raw_get::<_, Option<String>>("client_ip")? {
+            let ip = std::net::IpAddr::from_str(&ip).map_err(|e|
+                rlua::Error::FromLuaConversionError {
+                    from:   "string",
+                    to:     "std::net::IpAddr",
+                    message:    Some(e.to_string()),
+                })?;
+            self.client_ip = Some(ip);
+        }
+        if t.contains_key("status")? {
+            let status = t.raw_get::<_, usize>("status")?;
+            self.status = Err(status.into());
+        }
+        self.calling_system = t.raw_get("calling_system")?;
+        self.account = t.raw_get("account")?;
+        self.message = t.raw_get("message")?;
+        Ok(())
+    }
 }
 
 /// Enum used by the XS4ALL Radius code to define authentication errors.
@@ -470,7 +494,7 @@ pub(crate) fn error_iter() -> impl Iterator<Item=(Error, usize, String)> {
         if count < Error::count() {
             let c = count;
             count += 1;
-            Some((Error::from(c), c, format!("{:?}", c)))
+            Some((Error::from(c), c, format!("{:?}", Error::from(c))))
         } else {
             None
         }

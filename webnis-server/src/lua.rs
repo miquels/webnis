@@ -11,6 +11,7 @@ use serde_json::Value as JValue;
 
 use rlua::{self, Function, Lua, MetaMethod, ToLua, UserData, UserDataMethods};
 
+use crate::datalog;
 use crate::errors::*;
 use crate::{util, webnis::Webnis};
 
@@ -47,6 +48,9 @@ fn local_lua_init() -> LuaState {
     };
     let lua = Lua::new();
     if let Err::<(), _>(e) = lua.context(|ctx| {
+        // set globals
+        set_globals(ctx);
+        // load the script.
         let chunk = ctx.load(&lua_master.script);
         let chunk = chunk.set_name(&lua_master.name)?;
         chunk.exec()
@@ -65,11 +69,24 @@ pub(crate) fn lua_init(filename: &Path) -> Result<(), Error> {
     let script = std::fs::read_to_string(filename).context(format!("opening {:?}", filename))?;
     let lua = Lua::new();
     if let Err::<(), _>(e) = lua.context(|ctx| {
+        // set globals
+        set_globals(ctx);
+        // load the script.
         let chunk = ctx.load(&script);
         let chunk = chunk.set_name(filename.as_os_str().as_bytes())?;
         chunk.exec()
     }) {
         merror!("parsing lua script:\n{}", e);
+        Err(WnError::LuaError)?;
+    }
+    // if there is an "init" function, run it.
+    if let Err::<(), _>(e) = lua.context(|ctx| {
+        if let Ok::<Function, _>(func) = ctx.globals().get("init") {
+            return func.call::<_, rlua::MultiValue>(()).map(|_| ())
+        }
+        Ok(())
+    }) {
+        merror!("calling lua init():\n{}", e);
         Err(WnError::LuaError)?;
     }
 
@@ -194,6 +211,7 @@ impl UserData for Request {
         });
     }
 }
+
 /// lua_map calls a lua function. The return value is usually a map, or nil.
 pub(crate) fn lua_map(
     webnis: &Webnis,
@@ -209,7 +227,7 @@ pub(crate) fn lua_map(
             drop(lua_state);
             let mut lua_state_mut = lua_tls.borrow_mut();
 	        let webnis = webnis.clone();
-            lua_state_mut.lua.context(|ctx| set_globals(ctx, webnis));
+            lua_state_mut.lua.context(|ctx| set_webnis_global(ctx, webnis));
             lua_state_mut.did_init = true;
             drop(lua_state_mut);
             lua_state = lua_tls.borrow();
@@ -259,7 +277,7 @@ pub(crate) fn lua_auth(
             drop(lua_state);
             let mut lua_state_mut = lua_tls.borrow_mut();
 	        let webnis = webnis.clone();
-            lua_state_mut.lua.context(|ctx| set_globals(ctx, webnis));
+            lua_state_mut.lua.context(|ctx| set_webnis_global(ctx, webnis));
             lua_state_mut.did_init = true;
             drop(lua_state_mut);
             lua_state = lua_tls.borrow();
@@ -314,7 +332,7 @@ pub(crate) fn lua_auth(
     })
 }
 
-fn set_globals(ctx: rlua::Context, webnis: Webnis) {
+fn set_webnis_global(ctx: rlua::Context, webnis: Webnis) {
     let table = ctx.create_table().expect("failed to create table");
     let globals = ctx.globals();
 
@@ -367,6 +385,31 @@ fn set_globals(ctx: rlua::Context, webnis: Webnis) {
         .expect("failed to insert into table");
 
     globals.set("webnis", table).expect("failed to set global webnis");
+}
+
+fn set_globals(ctx: rlua::Context) {
+    let globals = ctx.globals();
+
+    // The datalog global table.
+    let datalog_table = ctx.create_table().expect("failed to create datalog table");
+    let datalog_fn = {
+        ctx.create_function(
+            move |_ctx, (_req, data) : (Option<rlua::AnyUserData>, rlua::Table)| {
+                let mut dl = datalog::Datalog::default();
+                dl.merge_rlua_table(data)?;
+                datalog::log_sync(dl);
+                Ok(())
+            }
+        )
+        .expect("failed to create func datalog()")
+    };
+    datalog_table
+        .set("log", datalog_fn)
+        .expect("failed to insert into datalog table");
+    for (_, num, name) in datalog::error_iter() {
+        datalog_table.set(name, num).expect("failed to insert into datalog table");
+    }
+    globals.set("datalog", datalog_table).expect("failed to set global datalog");
 
     // add a debugging function.
     let dprint = ctx
@@ -377,3 +420,4 @@ fn set_globals(ctx: rlua::Context, webnis: Webnis) {
         .unwrap();
     globals.set("dprint", dprint).unwrap();
 }
+

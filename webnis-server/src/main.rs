@@ -96,14 +96,6 @@ fn main() {
     // initialize webnis stuff
     let webnis = Webnis::new(config.clone(), securenets);
 
-    // initialize lua stuff
-    if let Some(ref l) = config.lua {
-        if let Err(e) = lua::lua_init(&l.script_) {
-            eprintln!("{}: {:?} {}", PROGNAME, l.script_, e);
-            exit(1);
-        }
-    }
-
     // initialize datalog stuff.
     let _datalog_guard = match config.server.datalog {
         Some(ref datalog) => {
@@ -117,6 +109,14 @@ fn main() {
         },
         None => None,
     };
+
+    // initialize lua stuff
+    if let Some(ref l) = config.lua {
+        if let Err(e) = lua::lua_init(&l.script_) {
+            eprintln!("{}: {:?} {}", PROGNAME, l.script_, e);
+            exit(1);
+        }
+    }
 
     if syntax {
         println!("configuration parsed succesfully");
