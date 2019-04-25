@@ -447,7 +447,7 @@ fn parse_ip(words: Vec<&str>) -> Result<IpNet, ()> {
 pub fn read_securenets(file: impl AsRef<Path>, iplist: &mut IpList) -> io::Result<()> {
     let buffer = std::fs::read_to_string(&file)?;
     for line in buffer.split('\n') {
-        let line = line.trim_left();
+        let line = line.trim_start();
         if line.is_empty() || line.starts_with("#") {
             continue;
         }
