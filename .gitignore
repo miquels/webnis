@@ -5,6 +5,7 @@
 *.tar.xz
 *.buildinfo
 *.changes
+*.upload
 */debian/.debhelper
 */debian/*-stamp
 */debian/*.debhelper
