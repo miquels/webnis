@@ -106,6 +106,10 @@ pub fn decode_post_body(body: &[u8]) -> HashMap<String, String> {
 }
 
 pub(crate) fn check_unix_password(passwd: &str, pwhash: &str) -> bool {
+    // we never allow DES hashes passwords. Sorry.
+    if pwhash.len() == 13 && !pwhash.starts_with("$") {
+        return false;
+    }
     let pwbytes: Cow<[u8]> = percent_decode(passwd.as_bytes()).into();
     pwhash::unix::verify(pwbytes, pwhash)
 }

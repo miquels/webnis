@@ -193,41 +193,55 @@ fn main() {
     let _ = sys.run();
 }
 
-fn check_authorization(req: &HttpRequest<Webnis>, domain: &str) -> Option<HttpResponse> {
+// Authorize the request.
+//
+// - get client IP address, fatal if we fail.
+// - check against the "securenets" file if needed
+// - check HTTP authentication
+// - on success,return client IP address.
+//
+fn check_authorization(req: &HttpRequest<Webnis>, domain: &str) -> Result<IpAddr, HttpResponse> {
     let webnis = req.state();
+
+    let pa = match req.peer_addr() {
+        Some(ip) => ip,
+        None => {
+            warn!("check_authorization: request has no source IP address?!");
+            return Err(http_error(StatusCode::INTERNAL_SERVER_ERROR, "Can't get client IP"));
+        },
+    };
+
+    let mut ip = pa.ip();
+    trace!("peer ip is {}", ip);
+    if ip.is_loopback() {
+        trace!("peer ip is loopback");
+        if let Some(remote) = req.connection_info().remote() {
+            trace!("connectioninfo remote is {}", remote);
+            if let Ok(ipaddr) = IpAddr::from_str(remote) {
+                ip = ipaddr;
+            }
+        }
+    }
 
     // check the securenets access list.
     if let Some(ref sn) = webnis.inner.securenets {
         trace!("checking securenets");
-        if let Some(pa) = req.peer_addr() {
-            let mut ip = pa.ip();
-            trace!("peer ip is {}", ip);
-            if ip.is_loopback() {
-                trace!("peer ip is loopback");
-                if let Some(remote) = req.connection_info().remote() {
-                    trace!("connectioninfo remote is {}", remote);
-                    if let Ok(ipaddr) = IpAddr::from_str(remote) {
-                        ip = ipaddr;
-                    }
-                }
-            }
-            if !sn.contains(ip) && !ip.is_loopback() {
-                warn!("securenets: access denied for peer {}", ip);
-                return Some(http_error(StatusCode::FORBIDDEN, "Access denied"));
-            }
+        if !sn.contains(ip) && !ip.is_loopback() {
+            warn!("securenets: access denied for peer {}", ip);
+            return Err(http_error(StatusCode::FORBIDDEN, "Access denied"));
         }
     }
 
     // check HTTP authentication.
     let domdef = match webnis.inner.config.find_domain(domain) {
-        None => return Some(http_error(StatusCode::NOT_FOUND, "Not found")),
+        None => return Err(http_error(StatusCode::NOT_FOUND, "Not found")),
         Some(d) => d,
     };
     match check_http_auth(req.headers(), domdef) {
         AuthResult::NoAuth | AuthResult::BadAuth => {
-            Some(http_unauthorized(&domdef.name, domdef.http_authschema.as_ref()))
+            Err(http_unauthorized(&domdef.name, domdef.http_authschema.as_ref()))
         },
-        AuthResult::AuthOk => None,
+        AuthResult::AuthOk => Ok(ip),
     }
 }
 
@@ -236,7 +250,7 @@ fn handle_map(req: &HttpRequest<Webnis>) -> HttpResponse {
         Err(_) => return HttpResponse::InternalServerError().body("handle_map should not fail\n"),
         Ok(d) => d,
     };
-    if let Some(denied) = check_authorization(req, &params.0) {
+    if let Err(denied) = check_authorization(req, &params.0) {
         return denied;
     }
     let keyname = req.query_string().split('=').next();
@@ -249,7 +263,7 @@ fn handle_info(req: &HttpRequest<Webnis>) -> HttpResponse {
         Err(_) => return HttpResponse::InternalServerError().body("handle_info should not fail\n"),
         Ok(d) => d,
     };
-    if let Some(denied) = check_authorization(req, &domain) {
+    if let Err(denied) = check_authorization(req, &domain) {
         return denied;
     }
     req.state().handle_info(&domain)
@@ -264,9 +278,10 @@ fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item = HttpResponse, Err
         },
         Ok(d) => d,
     };
-    if let Some(denied) = check_authorization(req, &domain) {
-        return Box::new(future::ok(denied));
-    }
+    let ip = match check_authorization(req, &domain) {
+        Ok(ip) => ip,
+        Err(denied) => return Box::new(future::ok(denied)),
+    };
 
     let is_json = match req.request().headers().get("content-type") {
         Some(ct) => ct == "application/json" || ct == "text/json",
@@ -276,9 +291,9 @@ fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item = HttpResponse, Err
     let webnis = req.state().clone();
     let domain = domain.clone();
     req.body()
-        .limit(1024)
+        .limit(4096)
         .from_err()
-        .and_then(move |data| future::ok(webnis.handle_auth(domain, is_json, data.to_vec()).into()))
+        .and_then(move |data| future::ok(webnis.handle_auth(domain, ip, is_json, data.to_vec()).into()))
         .responder()
 }
 

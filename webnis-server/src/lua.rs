@@ -1,9 +1,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::iter::FromIterator;
+use std::net::IpAddr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::SystemTime;
 
 use failure::ResultExt;
 use serde_json;
@@ -11,7 +13,7 @@ use serde_json::Value as JValue;
 
 use rlua::{self, Function, Lua, MetaMethod, ToLua, UserData, UserDataMethods};
 
-use crate::datalog;
+use crate::datalog::{self, Datalog};
 use crate::errors::*;
 use crate::{util, webnis::Webnis};
 
@@ -176,6 +178,7 @@ pub(crate) struct Request {
     pub keyname:  Option<String>,
     pub keyvalue: Option<String>,
     pub extra:    HashMap<String, serde_json::Value>,
+    pub src_ip:   Option<IpAddr>,
 }
 
 impl UserData for Request {
@@ -394,8 +397,22 @@ fn set_globals(ctx: rlua::Context) {
     let datalog_table = ctx.create_table().expect("failed to create datalog table");
     let datalog_fn = {
         ctx.create_function(
-            move |_ctx, (_req, data) : (Option<rlua::AnyUserData>, rlua::Table)| {
-                let mut dl = datalog::Datalog::default();
+            move |_ctx, (req, data) : (Option<rlua::AnyUserData>, rlua::Table)| {
+                let mut dl = match req {
+                    Some(req) => {
+                        let req = match req.borrow::<Request>() {
+                            Ok(r) => r,
+                            Err(e) => return Err(e),
+                        };
+                        Datalog{
+                            time:   SystemTime::now(),
+                            username:   req.username.clone().unwrap_or("".into()),
+                            src_ip:     req.src_ip.unwrap_or([0, 0, 0, 0].into()),
+                            ..Datalog::default()
+                        }
+                    },
+                    None => Datalog{ time: SystemTime::now(), ..Datalog::default() },
+                };
                 dl.merge_rlua_table(data)?;
                 datalog::log_sync(dl);
                 Ok(())

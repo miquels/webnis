@@ -181,21 +181,21 @@ impl LogWriter {
 #[derive(Debug, Clone)]
 pub(crate) struct Datalog {
     // timestamp
-    time:           SystemTime,
+    pub time:           SystemTime,
     // ip address where the request came from
-    src_ip:         IpAddr,
+    pub src_ip:         IpAddr,
     // "username" as sent in auth-request (radius attr 1)
-    username:       String,
+    pub username:       String,
     // username got mapped to this underlying account (datalog 25:"XS4/401:<account>")
-    account:        Option<String>,
+    pub account:        Option<String>,
     // "clientip" sent in auth-request (radius attr 31)
-    client_ip:      Option<IpAddr>,
+    pub client_ip:      Option<IpAddr>,
     // "callingsystem" sent in auth-request (radius attr 32)
-    calling_system: Option<String>,
+    pub calling_system: Option<String>,
     // Accept = Ok(()), Reject - Err(e).
-    status:         Result<(), Error>,
+    pub status:         Result<(), Error>,
     // error message overriding default error log_message (radius attr 24)
-    message:        Option<String>,
+    pub message:        Option<String>,
 }
 
 impl Default for Datalog {

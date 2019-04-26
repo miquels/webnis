@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use actix_web::http::StatusCode;
@@ -72,7 +73,7 @@ impl Webnis {
     }
 
     // authenticate user
-    pub fn handle_auth(&self, domainname: String, is_json: bool, body: Vec<u8>) -> HttpResponse {
+    pub fn handle_auth(&self, domainname: String, ip: IpAddr, is_json: bool, body: Vec<u8>) -> HttpResponse {
         // lookup domain in config
         let domain = match self.inner.config.find_domain(&domainname) {
             None => return json_error(StatusCode::BAD_REQUEST, None, "Domain not found"),
@@ -100,6 +101,7 @@ impl Webnis {
                 mapname:    auth.map.clone(),
                 keyname:    auth.key.clone(),
                 extra:      authinfo.extra,
+                src_ip:     Some(ip),
                 ..lua::Request::default()
             };
             let res = match lua::lua_auth(self, lua_func, req) {
