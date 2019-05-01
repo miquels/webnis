@@ -38,7 +38,10 @@ impl Webnis {
 }
 
 impl Webnis {
-    // show some info.
+    //
+    // Return a JSON object with some info about this domain. Members:
+    // - maps: a list of maps.
+    //
     pub fn handle_info(&self, domain: &str) -> HttpResponse {
         // lookup domain in config
         let domain = match self.inner.config.find_domain(domain) {
@@ -195,7 +198,7 @@ impl Webnis {
         Ok(res)
     }
 
-    /// This basically is the lua map_auth() function.
+    /// LUA support. The LUA webnis.map_auth() function calls this method.
     pub fn lua_map_auth(
         &self,
         domain: &str,
@@ -255,8 +258,8 @@ impl Webnis {
         }
     }
 
-    /// This basically is the lua map_lookup() function. Note that it
-    /// returns json Null if the key is not found.
+    /// LUA support. The LUA webnis.map_lookup() function calls this method.
+    /// Note that it returns json Null if the key is not found.
     pub fn lua_map_lookup(
         &self,
         domain: &str,
