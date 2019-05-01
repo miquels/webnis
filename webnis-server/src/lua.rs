@@ -102,11 +102,11 @@ pub(crate) fn lua_init(filename: &Path) -> Result<(), Error> {
 
 /// Recursively transform a serde_json::Value to a rlua::Value.
 /// This is surprisingly easy!
-fn json_value_to_lua<'lua>(ctx: rlua::Context<'lua>, jv: serde_json::Value) -> rlua::Value<'lua> {
+fn json_value_to_lua<'lua>(ctx: rlua::Context<'lua>, jv: &serde_json::Value) -> rlua::Value<'lua> {
     match jv {
-        serde_json::Value::Null => rlua::Nil,
-        serde_json::Value::Bool(b) => b.to_lua(ctx).unwrap(),
-        serde_json::Value::Number(n) => {
+        &serde_json::Value::Null => rlua::Nil,
+        &serde_json::Value::Bool(ref b) => (*b).to_lua(ctx).unwrap(),
+        &serde_json::Value::Number(ref n) => {
             if let Some(n) = n.as_i64() {
                 n.to_lua(ctx).unwrap()
             } else if let Some(n) = n.as_f64() {
@@ -115,18 +115,21 @@ fn json_value_to_lua<'lua>(ctx: rlua::Context<'lua>, jv: serde_json::Value) -> r
                 rlua::Nil
             }
         },
-        serde_json::Value::String(s) => s.to_lua(ctx).unwrap(),
-        serde_json::Value::Array(a) => {
-            a.into_iter()
+        &serde_json::Value::String(ref s) => s.as_str().to_lua(ctx).unwrap(),
+        &serde_json::Value::Array(ref a) => {
+            a.iter()
                 .map(|e| json_value_to_lua(ctx, e))
                 .collect::<Vec<_>>()
                 .to_lua(ctx)
                 .unwrap_or(rlua::Nil)
         },
-        serde_json::Value::Object(o) => {
-            let hm: HashMap<String, rlua::Value> =
-                HashMap::from_iter(o.into_iter().map(|(k, v)| (k, json_value_to_lua(ctx, v))));
-            hm.to_lua(ctx).unwrap_or(rlua::Nil)
+        &serde_json::Value::Object(ref o) => {
+            ctx.create_table().and_then(|table| {
+                for (k, v) in o.iter() {
+                    let _ = table.set(k.as_str(), json_value_to_lua(ctx, v));
+                }
+                table.to_lua(ctx)
+            }).unwrap_or(rlua::Nil)
         },
     }
 }
@@ -194,7 +197,7 @@ impl UserData for Request {
                 "keyvalue" => this.keyvalue.as_ref().and_then(|x| x.as_str().to_lua(ctx).ok()),
                 x => {
                     if let Some(jv) = this.extra.get(x) {
-                        Some(json_value_to_lua(ctx, jv.to_owned()))
+                        Some(json_value_to_lua(ctx, jv))
                     } else {
                         None
                     }
@@ -348,7 +351,7 @@ fn set_webnis_global(ctx: rlua::Context, webnis: Webnis) {
                     Err(e) => return Err(e),
                 };
                 let v = match webnis.lua_map_lookup(&req.domain, &mapname, &keyname, &keyvalue) {
-                    Ok(jv) => json_value_to_lua(ctx, jv),
+                    Ok(jv) => json_value_to_lua(ctx, &jv),
                     Err(e) => {
                         warn!("map_lookup {} {}={}: {}", mapname, keyname, keyvalue, e);
                         rlua::Nil
@@ -372,7 +375,7 @@ fn set_webnis_global(ctx: rlua::Context, webnis: Webnis) {
                 };
                 let password = req.password.as_ref().ok_or(rlua::Error::RuntimeError("password not set".into()))?;
                 let v = match webnis.lua_map_auth(&req.domain, &mapname, &keyname, &username, &password) {
-                    Ok(jv) => json_value_to_lua(ctx, JValue::Bool(jv)),
+                    Ok(jv) => json_value_to_lua(ctx, &JValue::Bool(jv)),
                     Err(e) => {
                         warn!("map_auth {} {}={}: {}", mapname, keyname, username, e);
                         rlua::Nil
