@@ -186,12 +186,12 @@ impl UserData for Request {
         methods.add_meta_method(MetaMethod::Index, |ctx, this: &Request, arg: String| {
             // table entry lookup.
             let r = match arg.as_str() {
-                "domain" => this.domain.clone().to_lua(ctx).ok(),
-                "username" => this.username.clone().map_or(None, |x| x.to_lua(ctx).ok()),
-                "password" => this.password.clone().map_or(None, |x| x.to_lua(ctx).ok()),
-                "mapname" => this.keyname.clone().map_or(None, |x| x.to_lua(ctx).ok()),
-                "keyname" => this.keyname.clone().map_or(None, |x| x.to_lua(ctx).ok()),
-                "keyvalue" => this.keyvalue.clone().map_or(None, |x| x.to_lua(ctx).ok()),
+                "domain" => this.domain.as_str().to_lua(ctx).ok(),
+                "username" => this.username.as_ref().and_then(|x| x.as_str().to_lua(ctx).ok()),
+                "password" => this.password.as_ref().and_then(|x| x.as_str().to_lua(ctx).ok()),
+                "mapname" => this.keyname.as_ref().and_then(|x| x.as_str().to_lua(ctx).ok()),
+                "keyname" => this.keyname.as_ref().and_then(|x| x.as_str().to_lua(ctx).ok()),
+                "keyvalue" => this.keyvalue.as_ref().and_then(|x| x.as_str().to_lua(ctx).ok()),
                 x => {
                     if let Some(jv) = this.extra.get(x) {
                         Some(json_value_to_lua(ctx, jv.to_owned()))
