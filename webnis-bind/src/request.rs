@@ -124,7 +124,7 @@ pub(crate) fn process(ctx: Context, line: String) -> Box<Future<Item=String, Err
 // the host is localhost, https otherwise.
 fn build_uri(host: &str, path: &str) -> hyper::Uri {
     let url = if host.starts_with("http://") || host.starts_with("https://") {
-        let host = host.trim_right_matches("/");
+        let host = host.trim_end_matches("/");
         format!("{}{}", host, path)
     } else if host == "localhost" || host.starts_with("localhost:") {
         format!("http://{}/.well-known/webnis{}", host, path)
@@ -252,6 +252,13 @@ fn req_with_retries(ctx: &Context, path: String, authorization: String, body: Op
                             if e.starts_with("550 ") {
                                 // throw away hyper::Client
     				            (*guard).client.take();
+                                // reset DNS resolver state just in case.
+                                // see https://github.com/rust-lang/rust/issues/47955
+                                #[cfg(target_env = "gnu")]
+                                {
+                                    extern { fn __h_errno_location() -> *mut i32; }
+                                    unsafe { *__h_errno_location() = 0 }
+                                }
                             } else {
                                 // just switch to next server.
                                 (*guard).seqno += 1;
