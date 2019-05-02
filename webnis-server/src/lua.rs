@@ -4,6 +4,7 @@ use std::iter::FromIterator;
 use std::net::IpAddr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
@@ -170,6 +171,67 @@ fn lua_value_to_json(lua_value: rlua::Value) -> serde_json::Value {
     }
 }
 
+/// This struct contains a refcounted Datalog. It's so that we can
+/// store it in the Request struct _and_ transform it into a AnyUserData.
+#[derive(Clone)]
+pub(crate) struct DatalogRef(Arc<Mutex<Option<Datalog>>>);
+
+/// Some constructors.
+impl DatalogRef {
+    #[allow(dead_code)]
+    pub fn new(d: Datalog) -> DatalogRef {
+        DatalogRef(Arc::new(Mutex::new(Some(d))))
+    }
+
+    pub fn set(&self, d: Datalog) {
+        let mut guard = self.0.lock().unwrap();
+        *guard = Some(d);
+    }
+}
+
+/// Default since Request must implement Default.
+impl Default for DatalogRef {
+    fn default() -> DatalogRef {
+        DatalogRef(Arc::new(Mutex::new(None)))
+    }
+}
+
+impl UserData for DatalogRef {
+    ///
+    /// Add just the NewIndex method here, for log.<key> = value.
+    ///
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_meta_method(MetaMethod::NewIndex, |_ctx, this: &DatalogRef, (key, value) : (String, rlua::Value)| {
+
+            // Ignore if the inner Datalog is not set.
+            let mut this = this.0.lock().unwrap();
+            let datalog = match this.as_mut() {
+                Some(d) => d,
+                None => return Ok(rlua::Nil),
+            };
+
+            // set table entry.
+            match key.as_str() {
+                "account" => match value {
+                    rlua::Value::String(v) => {
+                        datalog.account = Some(v.to_str()?.to_owned());
+                    },
+                    _ => return Err(rlua::Error::external("log.account = val: must be a string")),
+                },
+                "status" => match value {
+                    rlua::Value::Number(v) => {
+                        let n = v.round() as i64 as usize;
+                        datalog.status = Err(n.into());
+                    },
+                    _ => return Err(rlua::Error::external("log.status = val: must be a datalog.enum")),
+                },
+                x => return Err(rlua::Error::external(format!("log.{}: unknown key", x))),
+            }
+            Ok(rlua::Nil)
+        });
+    }
+}
+
 /// This contains data from the request. It is implemented as a Lua userdata
 /// struct, and passed to the lua auth/lookup hooks.
 #[derive(Default)]
@@ -182,6 +244,7 @@ pub(crate) struct Request {
     pub keyvalue: Option<String>,
     pub extra:    HashMap<String, serde_json::Value>,
     pub src_ip:   Option<IpAddr>,
+    pub log:      DatalogRef,
 }
 
 impl UserData for Request {
@@ -195,6 +258,11 @@ impl UserData for Request {
                 "mapname" => this.keyname.as_ref().and_then(|x| x.as_str().to_lua(ctx).ok()),
                 "keyname" => this.keyname.as_ref().and_then(|x| x.as_str().to_lua(ctx).ok()),
                 "keyvalue" => this.keyvalue.as_ref().and_then(|x| x.as_str().to_lua(ctx).ok()),
+                "log" => {
+                    let log = this.log.clone();
+                    let ud = ctx.create_userdata(log).and_then(|x| x.to_lua(ctx));
+                    ud.ok()
+                },
                 x => {
                     if let Some(jv) = this.extra.get(x) {
                         Some(json_value_to_lua(ctx, jv))
@@ -289,7 +357,18 @@ pub(crate) fn lua_auth(
             lua_state = lua_tls.borrow();
         }
 
-        lua_state.lua.context(|ctx| {
+        // set up the datalog member.
+        req.log.set(Datalog{
+            time:   SystemTime::now(),
+            username:   req.username.clone().unwrap_or("".into()),
+            src_ip:     req.src_ip.unwrap_or([0, 0, 0, 0].into()),
+            //client_ip:
+            //calling_system:
+            ..Datalog::default()
+        });
+        let datalog_ref = req.log.clone();
+
+        let res = lua_state.lua.context(|ctx| {
             let func: Function = match ctx.globals().get(funcname) {
                 Ok(f) => f,
                 Err(_e) => return Err(WnError::LuaFunctionNotFound),
@@ -333,8 +412,32 @@ pub(crate) fn lua_auth(
                 }
             };
 
+            // Log.
+
             Ok((jv, code))
-        })
+        });
+
+        // See if we need to update the log status.
+        let mut dl = datalog_ref.0.lock().unwrap().take().unwrap();
+        match res {
+            Err(ref e) => {
+                // internal error, override log status.
+                dl.status = Err(datalog::Error::GENERIC);
+                dl.message = Some(format!("{:?}", e));
+            },
+            Ok(ref v) => {
+                if v.0 == serde_json::Value::Null || v.1 >= 400 {
+                    // It's a reject, if status was not set do it now.
+                    if dl.status.is_ok() {
+                        dl.status = Err(datalog::Error::GENERIC);
+                    }
+                }
+            }
+        }
+        // And log.
+        datalog::log_sync(dl);
+
+        res
     })
 }
 
@@ -396,40 +499,12 @@ fn set_webnis_global(ctx: rlua::Context, webnis: Webnis) {
 fn set_globals(ctx: rlua::Context) {
     let globals = ctx.globals();
 
-    // The datalog global table.
-    let datalog_table = ctx.create_table().expect("failed to create datalog table");
-    let datalog_fn = {
-        ctx.create_function(
-            move |_ctx, (req, data) : (Option<rlua::AnyUserData>, rlua::Table)| {
-                let mut dl = match req {
-                    Some(req) => {
-                        let req = match req.borrow::<Request>() {
-                            Ok(r) => r,
-                            Err(e) => return Err(e),
-                        };
-                        Datalog{
-                            time:   SystemTime::now(),
-                            username:   req.username.clone().unwrap_or("".into()),
-                            src_ip:     req.src_ip.unwrap_or([0, 0, 0, 0].into()),
-                            ..Datalog::default()
-                        }
-                    },
-                    None => Datalog{ time: SystemTime::now(), ..Datalog::default() },
-                };
-                dl.merge_rlua_table(data)?;
-                datalog::log_sync(dl);
-                Ok(())
-            }
-        )
-        .expect("failed to create func datalog()")
-    };
-    datalog_table
-        .set("log", datalog_fn)
-        .expect("failed to insert into datalog table");
+    // The error global table.
+    let error_table = ctx.create_table().expect("failed to create error table");
     for (_, num, name) in datalog::error_iter() {
-        datalog_table.set(name, num).expect("failed to insert into datalog table");
+        error_table.set(name, num).expect("failed to insert into error table");
     }
-    globals.set("datalog", datalog_table).expect("failed to set global datalog");
+    globals.set("error", error_table).expect("failed to set global error table");
 
     // add a debugging function.
     let dprint = ctx

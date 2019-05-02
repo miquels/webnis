@@ -7,7 +7,6 @@ use std::fs;
 use std::io::{self, Write};
 use std::net::IpAddr;
 use std::os::unix::fs::MetadataExt;
-use std::str::FromStr;
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration,SystemTime,UNIX_EPOCH};
@@ -309,7 +308,10 @@ impl Datalog {
         (request.as_slice().join(","), reply.as_slice().join(","))
     }
 
+    /*
+    // Remnant from when request.log was a Lua table instead of userdata.
     pub fn merge_rlua_table(&mut self, t: rlua::Table) -> Result<(), rlua::Error> {
+        use std::str::FromStr;
         if t.contains_key("username")? {
             self.username = t.raw_get("username")?;
         }
@@ -331,6 +333,7 @@ impl Datalog {
         self.message = t.raw_get("message")?;
         Ok(())
     }
+    */
 }
 
 /// Enum used by the XS4ALL Radius code to define authentication errors.
