@@ -113,13 +113,13 @@ impl Webnis {
                         json_error(
                             StatusCode::FORBIDDEN,
                             Some(StatusCode::UNAUTHORIZED),
-                            "Password incorrect",
+                            "Login incorrect",
                         )
                     } else {
                         json_error(
                             StatusCode::from_u16(status).unwrap(),
                             Some(StatusCode::UNAUTHORIZED),
-                            "Password incorrect",
+                            "Login incorrect",
                         )
                     }
                 },
@@ -143,7 +143,7 @@ impl Webnis {
                 json_error(
                     StatusCode::FORBIDDEN,
                     Some(StatusCode::UNAUTHORIZED),
-                    "Password incorrect",
+                    "Login incorrect",
                 )
             },
             Err(WnError::MapNotFound) => {

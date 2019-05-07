@@ -1,3 +1,9 @@
+webnis-server (0.4) stretch; urgency=low
+
+  * add xs4all legacy "datalog" logging
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Tue, 07 May 2019 11:35:08 +0200
+
 webnis-server (0.3) stretch; urgency=low
 
   * percent_encode(DEFAULT_ENCODE_SET) doesn't encode the '%' sign (sigh..)

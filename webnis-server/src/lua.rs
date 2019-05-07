@@ -219,8 +219,8 @@ impl UserData for DatalogRef {
                     _ => return Err(rlua::Error::external("log.account = val: must be a string")),
                 },
                 "status" => match value {
-                    rlua::Value::Number(v) => {
-                        let n = v.round() as i64 as usize;
+                    rlua::Value::Integer(v) => {
+                        let n = v as usize;
                         datalog.status = Err(n.into());
                     },
                     _ => return Err(rlua::Error::external("log.status = val: must be a datalog.enum")),
@@ -261,6 +261,7 @@ impl UserData for Request {
                 "log" => {
                     let log = this.log.clone();
                     let ud = ctx.create_userdata(log).and_then(|x| x.to_lua(ctx));
+                    debug!("log userdata -> {:?}", ud);
                     ud.ok()
                 },
                 x => {
@@ -345,6 +346,8 @@ pub(crate) fn lua_auth(
     req: Request,
 ) -> Result<(serde_json::Value, u16), WnError>
 {
+    let do_log = webnis.inner.config.server.datalog.is_some();
+
     LUA.with(|lua_tls| {
         let mut lua_state = lua_tls.borrow();
         if !lua_state.did_init {
@@ -357,15 +360,25 @@ pub(crate) fn lua_auth(
             lua_state = lua_tls.borrow();
         }
 
-        // set up the datalog member.
-        req.log.set(Datalog{
-            time:   SystemTime::now(),
-            username:   req.username.clone().unwrap_or("".into()),
-            src_ip:     req.src_ip.unwrap_or([0, 0, 0, 0].into()),
-            //client_ip:
-            //calling_system:
-            ..Datalog::default()
-        });
+        if do_log {
+            // set up the datalog member.
+            let client_ip = match req.extra.get("client_ip") {
+                Some(serde_json::Value::String(ref s)) => s.parse::<IpAddr>().ok(),
+                _ => None,
+            };
+            let calling_system = match req.extra.get("calling_system") {
+                Some(serde_json::Value::String(ref s)) => Some(s.clone()),
+                _ => None,
+            };
+            req.log.set(Datalog{
+                time:   SystemTime::now(),
+                username:       req.username.clone().unwrap_or("".into()),
+                src_ip:         req.src_ip.unwrap_or([0, 0, 0, 0].into()),
+                client_ip:      client_ip,
+                calling_system: calling_system,
+                ..Datalog::default()
+            });
+        }
         let datalog_ref = req.log.clone();
 
         let res = lua_state.lua.context(|ctx| {
@@ -412,30 +425,30 @@ pub(crate) fn lua_auth(
                 }
             };
 
-            // Log.
-
             Ok((jv, code))
         });
 
         // See if we need to update the log status.
-        let mut dl = datalog_ref.0.lock().unwrap().take().unwrap();
-        match res {
-            Err(ref e) => {
-                // internal error, override log status.
-                dl.status = Err(datalog::Error::GENERIC);
-                dl.message = Some(format!("{:?}", e));
-            },
-            Ok(ref v) => {
-                if v.0 == serde_json::Value::Null || v.1 >= 400 {
-                    // It's a reject, if status was not set do it now.
-                    if dl.status.is_ok() {
-                        dl.status = Err(datalog::Error::GENERIC);
+        if do_log {
+            let mut dl = datalog_ref.0.lock().unwrap().take().unwrap();
+            match res {
+                Err(ref e) => {
+                    // internal error, override log status.
+                    dl.status = Err(datalog::Error::GENERIC);
+                    dl.message = Some(format!("{:?}", e));
+                },
+                Ok(ref v) => {
+                    if v.0 == serde_json::Value::Null || v.1 >= 400 {
+                        // It's a reject, if status was not set do it now.
+                        if dl.status.is_ok() {
+                            dl.status = Err(datalog::Error::GENERIC);
+                        }
                     }
                 }
             }
+            // And log.
+            datalog::log_sync(dl);
         }
-        // And log.
-        datalog::log_sync(dl);
 
         res
     })
