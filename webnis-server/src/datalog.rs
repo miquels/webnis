@@ -188,9 +188,9 @@ pub(crate) struct Datalog {
     // username got mapped to this underlying account (datalog 25:"XS4/401:<account>")
     pub account:        Option<String>,
     // "clientip" sent in auth-request (radius attr 31)
-    pub client_ip:      Option<IpAddr>,
+    pub clientip:       Option<IpAddr>,
     // "callingsystem" sent in auth-request (radius attr 32)
-    pub calling_system: Option<String>,
+    pub callingsystem:  Option<String>,
     // Accept = Ok(()), Reject - Err(e).
     pub status:         Result<(), Error>,
     // error message overriding default error log_message (radius attr 24)
@@ -204,8 +204,8 @@ impl Default for Datalog {
             src_ip:         [0u8, 0u8, 0u8, 0u8].into(),
             username:       "".to_string(),
             account:        None,
-            client_ip:      None,
-            calling_system: None,
+            clientip:       None,
+            callingsystem:  None,
             status:         Ok(()),
             message:        None,
         }
@@ -271,10 +271,10 @@ impl Datalog {
         request.push(attr_string(1, &self.username));
         request.push("2:\"\"".to_string());
         request.push(attr_item(4, &src_ip));
-        if let Some(ref s) = self.calling_system {
+        if let Some(ref s) = self.callingsystem {
             request.push(attr_string(32, s));
         }
-        if let Some(ref ip) = self.client_ip {
+        if let Some(ref ip) = self.clientip {
             let ip = match ip {
                 &IpAddr::V4(ref addr) => addr.to_string(),
                 &IpAddr::V6(ref addr) => addr.to_string(),
@@ -296,6 +296,11 @@ impl Datalog {
                 reply.push(attr_xs401(25, account));
             }
         }
+        // if no attrs pushed, add an empty attr (i.e. a comma).
+        if reply.len() == 3 {
+            reply.push("".to_string());
+        }
+
         if let Err(ref e) = self.status {
             match self.message {
                 Some(ref m) => reply.push(attr_string(24, m)),
@@ -315,20 +320,20 @@ impl Datalog {
         if t.contains_key("username")? {
             self.username = t.raw_get("username")?;
         }
-        if let Some(ip) = t.raw_get::<_, Option<String>>("client_ip")? {
+        if let Some(ip) = t.raw_get::<_, Option<String>>("clientip")? {
             let ip = std::net::IpAddr::from_str(&ip).map_err(|e|
                 rlua::Error::FromLuaConversionError {
                     from:   "string",
                     to:     "std::net::IpAddr",
                     message:    Some(e.to_string()),
                 })?;
-            self.client_ip = Some(ip);
+            self.clientip = Some(ip);
         }
         if t.contains_key("status")? {
             let status = t.raw_get::<_, usize>("status")?;
             self.status = Err(status.into());
         }
-        self.calling_system = t.raw_get("calling_system")?;
+        self.callingsystem = t.raw_get("callingsystem")?;
         self.account = t.raw_get("account")?;
         self.message = t.raw_get("message")?;
         Ok(())

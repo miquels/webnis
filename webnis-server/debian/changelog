@@ -1,3 +1,11 @@
+webnis-server (0.5.0) stretch; urgency=low
+
+  * client_ip -> clientip, calling_system -> callingsystem
+  * add trailing comma in datalog if no attributes are present (legacy formats
+    ...)
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Tue, 07 May 2019 16:35:41 +0200
+
 webnis-server (0.4) stretch; urgency=low
 
   * add xs4all legacy "datalog" logging

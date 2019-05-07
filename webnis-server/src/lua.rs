@@ -261,7 +261,6 @@ impl UserData for Request {
                 "log" => {
                     let log = this.log.clone();
                     let ud = ctx.create_userdata(log).and_then(|x| x.to_lua(ctx));
-                    debug!("log userdata -> {:?}", ud);
                     ud.ok()
                 },
                 x => {
@@ -362,11 +361,11 @@ pub(crate) fn lua_auth(
 
         if do_log {
             // set up the datalog member.
-            let client_ip = match req.extra.get("client_ip") {
+            let clientip = match req.extra.get("clientip") {
                 Some(serde_json::Value::String(ref s)) => s.parse::<IpAddr>().ok(),
                 _ => None,
             };
-            let calling_system = match req.extra.get("calling_system") {
+            let callingsystem = match req.extra.get("callingsystem") {
                 Some(serde_json::Value::String(ref s)) => Some(s.clone()),
                 _ => None,
             };
@@ -374,8 +373,8 @@ pub(crate) fn lua_auth(
                 time:   SystemTime::now(),
                 username:       req.username.clone().unwrap_or("".into()),
                 src_ip:         req.src_ip.unwrap_or([0, 0, 0, 0].into()),
-                client_ip:      client_ip,
-                calling_system: calling_system,
+                clientip:       clientip,
+                callingsystem:  callingsystem,
                 ..Datalog::default()
             });
         }
