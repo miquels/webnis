@@ -1,3 +1,11 @@
+webnis-server (0.5.1) stretch; urgency=low
+
+  * use tokio in datalog.rs to process the logging stream
+  * add a 1-second interval timer
+  * at every interval check if the file was rotated.
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Thu, 16 May 2019 22:58:20 +0200
+
 webnis-server (0.5.0) stretch; urgency=low
 
   * client_ip -> clientip, calling_system -> callingsystem
