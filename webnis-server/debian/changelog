@@ -1,3 +1,9 @@
+webnis-server (0.5.2) stretch; urgency=low
+
+  * datalog.rs: detect that log stream has ended on shutdown.
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Fri, 17 May 2019 09:43:28 +0200
+
 webnis-server (0.5.1) stretch; urgency=low
 
   * use tokio in datalog.rs to process the logging stream

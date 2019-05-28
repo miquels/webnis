@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration,SystemTime,UNIX_EPOCH};
 
 use fs2::FileExt;
-use futures::{Future,sink,Sink,Stream};
+use futures::{Future,sink,Sink,Stream,stream};
 use futures::sync::mpsc::{Sender,Receiver,channel};
 use lazy_static::lazy_static;
 
@@ -78,6 +78,13 @@ struct LogWriter {
     dev:    u64,
     ino:    u64,
     recv:   Option<Receiver<Datalog>>,
+}
+
+// used by LogWriter::run().
+enum LogItem {
+    Item(Datalog),
+    Tick,
+    Done,
 }
 
 impl LogWriter {
@@ -159,44 +166,49 @@ impl LogWriter {
         // Get a single-threaded tokio executor.
         let mut runtime = tokio::runtime::current_thread::Runtime::new().unwrap();
 
-        // timer.
+        // timer, stream of LogItem::Tick.
         let tick =  tokio::timer::Interval::new_interval(Duration::from_millis(1000));
-        let tick = tick.map(|_| Datalog::default()).map_err(|_| ());
+        let tick = tick.map(|_| LogItem::Tick).map_err(|_| ());
+
+        // recv channel, stream of LogItem::Item, final item LogItem::Done.
+        let recv = self.recv.take().unwrap().map(|i| LogItem::Item(i));
+        let recv = recv.chain(stream::once(Ok(LogItem::Done)));
 
         // combined stream of ticks and messages.
-        let recv = self.recv.take().unwrap();
         let strm = recv.select(tick);
 
         // logging loop.
         let mut log_is_empty = false;
         let logger = strm.for_each(move |item| {
 
-            // empty, so just a timer tick?
-            if item.is_empty() {
-                if !log_is_empty {
-                    log_is_empty = self.check_and_lock();
-                    let file = self.file.as_mut().unwrap();
-                    if file.unlock().is_err() {
+            match item {
+                LogItem::Done => return Err(()),
+                LogItem::Tick => {
+                    if !log_is_empty {
+                        log_is_empty = self.check_and_lock();
+                        let file = self.file.as_mut().unwrap();
+                        if file.unlock().is_err() {
+                            self.file.take();
+                        }
+                    }
+                },
+                LogItem::Item(item) => {
+                    // write the datalog item.
+                    let (line1, line2) = item.to_lines();
+                    loop {
+                        self.check_and_lock();
+                        let file = self.file.as_mut().unwrap();
+                        if write!(file, "{}\n{}\n", line1, line2).is_ok() {
+                            if file.unlock().is_err() {
+                                self.file.take();
+                            }
+                            break;
+                        }
                         self.file.take();
                     }
-                }
-                return Ok(());
+                    log_is_empty = false;
+                },
             }
-
-            // write the datalog item.
-            let (line1, line2) = item.to_lines();
-            loop {
-                self.check_and_lock();
-                let file = self.file.as_mut().unwrap();
-                if write!(file, "{}\n{}\n", line1, line2).is_ok() {
-                    if file.unlock().is_err() {
-                        self.file.take();
-                    }
-                    break;
-                }
-                self.file.take();
-            }
-            log_is_empty = false;
             Ok(())
         });
 
@@ -278,13 +290,6 @@ fn attr_item(attr: usize, item: impl std::fmt::Display) -> String {
 }
 
 impl Datalog {
-
-    // default or emoty?
-    fn is_empty(&self) -> bool {
-        self.time == SystemTime::UNIX_EPOCH &&
-            self.src_ip.is_unspecified() &&
-            self.username.as_str() == ""
-    }
 
     // Generate 2 lines in "datalog" format.
     fn to_lines(&self) -> (String, String) {
