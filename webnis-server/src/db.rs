@@ -10,7 +10,7 @@ use gdbm;
 use rand::{thread_rng, Rng};
 use rand::distributions::Uniform;
 use serde::{self, Deserialize, Deserializer};
-use serde_json;
+use serde_json::{self, json};
 
 use crate::errors::*;
 

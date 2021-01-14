@@ -1,15 +1,11 @@
 #[macro_use]
-extern crate clap;
-#[macro_use]
 extern crate failure_derive;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
 #[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate serde_json;
+extern crate clap;
 
 pub(crate) mod datalog;
 #[macro_use]
@@ -269,7 +265,7 @@ fn handle_info(req: &HttpRequest<Webnis>) -> HttpResponse {
     req.state().handle_info(&domain)
 }
 
-fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item = HttpResponse, Error = actix_web::Error>> {
+fn handle_auth(req: &HttpRequest<Webnis>) -> Box<dyn Future<Item = HttpResponse, Error = actix_web::Error>> {
     let domain = match Path::<String>::extract(req) {
         Err(_) => {
             return Box::new(future::ok(
@@ -283,8 +279,11 @@ fn handle_auth(req: &HttpRequest<Webnis>) -> Box<Future<Item = HttpResponse, Err
         Err(denied) => return Box::new(future::ok(denied)),
     };
 
-    let is_json = match req.request().headers().get("content-type") {
-        Some(ct) => ct == "application/json" || ct == "text/json",
+    let is_json = match req.request().headers().get("content-type").map(|v| v.to_str().ok()).flatten() {
+        Some(ct) => {
+            let ct = ct.split(';').next().unwrap().trim();
+            ct == "application/json" || ct == "text/json"
+        },
         None => false,
     };
 

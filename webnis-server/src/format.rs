@@ -2,7 +2,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use serde::{self, Deserialize, Deserializer};
+use serde::{self, Deserialize, Deserializer, Serialize};
 use serde_json;
 
 use crate::errors::*;

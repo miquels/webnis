@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use serde::Deserialize;
 use toml;
 
 use crate::db::{deserialize_map_type, MapType};
