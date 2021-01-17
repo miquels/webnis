@@ -142,11 +142,12 @@ async fn async_main() {
         .and(warp::path::end())
         .and(warp::filters::method::post())
         .and(warp::header("content-type"))
+        .and(warp::filters::method::post())
         .and(warp::body::bytes())
         .and_then(move |webnis: Webnis, domain: String, ip: IpAddr, ct: String, body: bytes::Bytes| async move {
             let ct = ct.split(';').next().unwrap().trim();
             if ct != X_WWW_FORM && ct != APPL_JSON && ct != TEXT_JSON {
-                return Err(Reject::status(StatusCode::METHOD_NOT_ALLOWED, "only POST allowed"));
+                return Err(Reject::status(StatusCode::UNSUPPORTED_MEDIA_TYPE, "content-type must be json or www-form"));
             }
             let is_json = ct != X_WWW_FORM;
             webnis.handle_auth(domain, ip, is_json, body.to_vec())
@@ -161,7 +162,7 @@ async fn async_main() {
         });
 
     let api = map.or(auth).or(info);
-    let routes = warp::path("/webnis").or(warp::path("/.well-known/webnis")).unify().and(api);
+    let routes = warp::path("webnis").or(warp::path!(".well-known" / "webnis" / ..)).unify().and(api);
     let routes = routes.recover(Reject::handle_rejection);
 
     let mut handles = Vec::new();

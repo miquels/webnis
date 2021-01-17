@@ -15,6 +15,14 @@ type WarpResult = Result<warp::reply::Response, warp::Rejection>;
 
 use crate::config;
 
+fn stringnl(msg: impl Into<String>) -> String {
+    let mut msg = msg.into();
+    if !msg.ends_with("\n") {
+        msg.push('\n');
+    }
+    msg
+}
+
 pub(crate) enum Reject {
     Status(StatusCode, String),
     Unauthorized(Option<String>),
@@ -50,13 +58,13 @@ impl Reject {
                 Response::builder()
                     .status(status)
                     .header("content-type", "text/plain")
-                    .body(Body::from(msg.to_string()))
+                    .body(Body::from(stringnl(msg)))
             },
             Reject::JsonError(status, json) => {
                 Response::builder()
                     .status(status)
                     .header("content-type", "application/json")
-                    .body(Body::from(json.to_string()))
+                    .body(Body::from(stringnl(json)))
             },
             Reject::Unauthorized(schema) => {
                 let mut builder = Response::builder()
@@ -65,14 +73,14 @@ impl Reject {
                 if let Some(schema) = schema {
                     builder = builder.header("www-authenticate", schema);
                 }
-                builder.body(Body::from("credentials missing"))
+                builder.body(Body::from("credentials missing\n"))
             },
         }.map_err(http_to_reject)?;
         Ok(resp)
     }
 
     pub fn status(status: StatusCode, msg: impl Into<String>) -> Rejection {
-        warp::reject::custom(Self::Status(status, msg.into()))
+        warp::reject::custom(Self::Status(status, stringnl(msg)))
     }
 }
 
@@ -83,7 +91,7 @@ fn http_to_reject(err: http::Error) -> Rejection {
 
 impl From<http::Error> for Reject {
     fn from(err: http::Error) -> Reject {
-        Reject::Status(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+        Reject::Status(StatusCode::INTERNAL_SERVER_ERROR, stringnl(err.to_string()))
     }
 }
 
@@ -97,11 +105,12 @@ impl From<Reject> for Rejection {
 pub(crate) fn http_unauthorized(domain: &str, schema: Option<&String>) -> Rejection {
     debug!("401 Unauthorized");
     let wa = schema.map(|schema| {
-        if schema.as_str() == "Basic" {
+        let s = if schema.as_str() == "Basic" {
             format!("{} realm=\"{}\"", schema, domain)
         } else {
             schema.to_owned()
-        }
+        };
+	stringnl(s)
     });
     warp::reject::custom(Reject::Unauthorized(wa))
 }
@@ -114,13 +123,11 @@ pub(crate) fn json_error(outer_code: StatusCode, inner_code: Option<StatusCode>,
         }
     });
     debug!("{}", body);
-    let body = body.to_string() + "\n";
-    warp::reject::custom(Reject::JsonError(outer_code, body.to_string()))
+    warp::reject::custom(Reject::JsonError(outer_code, stringnl(body.to_string())))
 }
 
 pub(crate) fn json_result(code: StatusCode, msg: &serde_json::Value) -> WarpResult {
-    let body = json!({ "result": msg });
-    let body = body.to_string() + "\n";
+    let body = stringnl(json!({ "result": msg }).to_string());
 
     Response::builder()
         .status(code)
@@ -130,8 +137,7 @@ pub(crate) fn json_result(code: StatusCode, msg: &serde_json::Value) -> WarpResu
 }
 
 pub(crate) fn json_result_raw(code: StatusCode, raw: &serde_json::Value) -> WarpResult {
-    let body = json!(raw);
-    let body = body.to_string() + "\n";
+    let body = stringnl(json!(raw).to_string());
 
     Response::builder()
         .status(code)
