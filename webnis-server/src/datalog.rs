@@ -9,17 +9,19 @@ use std::net::IpAddr;
 use std::os::unix::fs::MetadataExt;
 use std::sync::Mutex;
 use std::thread;
-use std::time::{Duration,SystemTime,UNIX_EPOCH};
+use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
+
+use crossfire::mpsc::bounded_tx_future_rx_blocking as channel;
+use crossfire::mpsc::{RxBlocking, TxFuture, SharedSenderFRecvB};
 
 use fs2::FileExt;
-use futures::{Future,sink,Sink,Stream,stream};
-use futures::sync::mpsc::{Sender,Receiver,channel};
 use lazy_static::lazy_static;
+use tokio::{task, time, time::Duration};
 
 // LogSender, send data to the logging thread.
 struct LogSender {
-    tx:         Sender<Datalog>,
-    tx_wait:    sink::Wait<Sender<Datalog>>,
+    tx:         TxFuture<LogItem, SharedSenderFRecvB>,
+    wait:       std::sync::mpsc::Receiver<()>,
 }
 
 // Producer side of the log channel.
@@ -28,20 +30,17 @@ lazy_static! {
 }
 
 /// Returned by datalog::init().
-pub(crate) struct LogGuard {
-    handle:     Option<thread::JoinHandle<()>>,
-}
+pub(crate) struct LogGuard;
 
 impl Drop for LogGuard {
     fn drop(&mut self) {
-        let tx = {
+        // close the channel to the logging thread, then wait for it to exit.
+        let wait = {
             let mut guard = LOGGER.lock().unwrap();
-            let mut logger = guard.take().unwrap();
-            let _ = logger.tx_wait.close();
-            logger.tx
+            let logger = guard.take().unwrap();
+            logger.wait
         };
-        let _ = tx.wait().close();
-        let _ = self.handle.take().unwrap().join();
+        let _ = wait.recv();
     }
 }
 
@@ -50,25 +49,30 @@ impl Drop for LogGuard {
 pub(crate) fn log_sync(item: Datalog) {
     let mut guard = LOGGER.lock().unwrap();
     let logger = guard.as_mut().unwrap();
-    let _ = logger.tx_wait.send(item);
+    //let _ = futures::executor::block_on(async move {
+    //    logger.tx.send(LogItem::Item(item)).await
+    //});
+    let _ = logger.tx.send_blocking(LogItem::Item(item));
 }
 
 /// Log a `Datalog` item. Asynchronous.
 /// panics if datalog::init() has not yet been called.
 #[allow(dead_code)]
-pub(crate) fn log_async(item: Datalog) -> impl Future<Item=Sender<Datalog>, Error=io::Error> {
-    let mut guard = LOGGER.lock().unwrap();
-    let logger = guard.as_mut().unwrap();
-    logger.tx.clone().send(item).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+pub(crate) async fn log_async(item: Datalog) -> io::Result<()> {
+    let logger = {
+        let mut guard = LOGGER.lock().unwrap();
+        guard.as_mut().unwrap().tx.clone()
+    };
+    logger.send(LogItem::Item(item)).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
 }
 
 /// Initialize the datalog logging system.
 ///
 /// Returns a guard handle. When the handle is dropped, the logging thread
 /// will process all remaining datalog items in the channel and then exit.
-pub(crate) fn init(filename: impl ToString) -> io::Result<LogGuard> {
-    let handle = LogWriter::init(filename)?;
-    Ok(LogGuard{ handle: Some(handle) })
+pub(crate) async fn init(filename: impl ToString) -> io::Result<LogGuard> {
+    LogWriter::init(filename).await?;
+    Ok(LogGuard)
 }
 
 // LogWriter, receives log messages and writes them to disk.
@@ -77,14 +81,14 @@ struct LogWriter {
     name:   String,
     dev:    u64,
     ino:    u64,
-    recv:   Option<Receiver<Datalog>>,
+    recv:   RxBlocking<LogItem, SharedSenderFRecvB>,
+    wait:   std::sync::mpsc::SyncSender<()>,
 }
 
 // used by LogWriter::run().
 enum LogItem {
     Item(Datalog),
     Tick,
-    Done,
 }
 
 impl LogWriter {
@@ -92,21 +96,37 @@ impl LogWriter {
     // Initialize logwriter. If the datalog file cannot be
     // opened, return an error. Otherwise spawn a background
     // thread to process log messages and return the thread handle.
-    fn init(filename: impl ToString) -> io::Result<thread::JoinHandle<()>> {
-        let (tx, rx) = channel(0);
+    async fn init(filename: impl ToString) -> io::Result<thread::JoinHandle<()>> {
+        let (log_tx, log_rx) = channel(1);
+        let (wait_tx, wait_rx) =  std::sync::mpsc::sync_channel(0);
+
         let mut guard = LOGGER.lock().unwrap();
         *guard = Some(LogSender{
-            tx:         tx.clone(),
-            tx_wait:    tx.wait(),
+            tx:         log_tx.clone(),
+            wait:       wait_rx,
         });
+
         let mut d = LogWriter {
             file:   None,
             name:   filename.to_string(),
             dev:    0,
             ino:    0,
-            recv:   Some(rx),
+            recv:   log_rx,
+            wait:   wait_tx,
         };
         d.reopen(false)?;
+
+        // Every second, send a LogItem::Tick.
+        task::spawn(async move {
+            loop {
+                time::delay_for(Duration::from_millis(1000)).await;
+                if let Err(_) = log_tx.send(LogItem::Tick).await {
+                    break;
+                }
+            }
+        });
+
+        // Spawn a thread for the sync DataLog::run method.
         Ok(thread::spawn(move || {
             d.run();
         }))
@@ -133,7 +153,7 @@ impl LogWriter {
                     if !retry {
                         return Err(e);
                     }
-                    thread::sleep(Duration::from_millis(1000));
+                    thread::sleep(StdDuration::from_millis(1000));
                 },
             }
         }
@@ -162,27 +182,11 @@ impl LogWriter {
 
     // main logging loop.
     fn run(&mut self) {
-
-        // Get a single-threaded tokio executor.
-        let mut runtime = tokio::runtime::current_thread::Runtime::new().unwrap();
-
-        // timer, stream of LogItem::Tick.
-        let tick =  tokio::timer::Interval::new_interval(Duration::from_millis(1000));
-        let tick = tick.map(|_| LogItem::Tick).map_err(|_| ());
-
-        // recv channel, stream of LogItem::Item, final item LogItem::Done.
-        let recv = self.recv.take().unwrap().map(|i| LogItem::Item(i));
-        let recv = recv.chain(stream::once(Ok(LogItem::Done)));
-
-        // combined stream of ticks and messages.
-        let strm = recv.select(tick);
-
-        // logging loop.
         let mut log_is_empty = false;
-        let logger = strm.for_each(move |item| {
+
+        while let Ok(item) = self.recv.recv() {
 
             match item {
-                LogItem::Done => return Err(()),
                 LogItem::Tick => {
                     if !log_is_empty {
                         log_is_empty = self.check_and_lock();
@@ -209,10 +213,9 @@ impl LogWriter {
                     log_is_empty = false;
                 },
             }
-            Ok(())
-        });
+        }
 
-        let _ = runtime.block_on(logger);
+        let _ = self.wait.send(());
     }
 }
 

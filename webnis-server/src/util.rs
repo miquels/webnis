@@ -1,54 +1,112 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use actix_web::http::header::{self, HeaderMap, HeaderValue};
-use actix_web::http::StatusCode;
-use actix_web::HttpResponse;
-
 use base64;
+use http::{Response, StatusCode};
+use hyper::body::Body;
 use percent_encoding::{percent_decode, utf8_percent_encode, PATH_SEGMENT_ENCODE_SET};
 use pwhash;
-use serde_json::{self, json};
+use serde_json::json;
 use serde::Deserialize;
+use warp::Rejection;
+use warp::reply::Reply;
+
+type WarpResult = Result<warp::reply::Response, warp::Rejection>;
 
 use crate::config;
 
-//pub(crate) type BoxedError = Box<::std::error::Error>;
-//pub(crate) type BoxedFuture = Box<Future<Item=HttpResponse, Error=BoxedError>>;
-//
-//pub(crate) fn box_error(e: impl std::error::Error + Send + Sync + 'static) -> BoxedError {
-//    Box::new(e)
-//}
+pub(crate) enum Reject {
+    Status(StatusCode, String),
+    Unauthorized(Option<String>),
+    JsonError(StatusCode, String),
+}
 
-// helpers.
-pub(crate) fn http_error(code: StatusCode, msg: &'static str) -> HttpResponse {
-    debug!("{}", msg);
-    let msg = msg.to_string() + "\n";
-    let mut builder = HttpResponse::build(code);
-    if code.is_server_error() || code == StatusCode::FORBIDDEN {
-        builder.force_close();
+impl warp::reject::Reject for Reject {}
+
+impl std::fmt::Debug for Reject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut dbg = f.debug_tuple("Reject");
+        match self {
+            &Reject::Status(ref c, ref s) => dbg.field(c).field(s).finish(),
+            &Reject::JsonError(ref c, ref j) => dbg.field(c).field(j).finish(),
+            &Reject::Unauthorized(ref s) => {
+                match s.as_ref() {
+                   Some(s) => dbg.field(&StatusCode::UNAUTHORIZED).field(s).finish(),
+                   None => dbg.field(&StatusCode::UNAUTHORIZED).finish(),
+                }
+            },
+        }
     }
-    builder.header(header::CONTENT_TYPE, "text/plain");
-    builder.body(msg)
+}
+
+impl Reject {
+    pub(crate) async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
+        let this = match err.find::<Reject>() {
+            Some(reject) => reject,
+            None => return Err(err),
+        };
+        let resp = match this {
+            Reject::Status(status, msg) => {
+                Response::builder()
+                    .status(status)
+                    .header("content-type", "text/plain")
+                    .body(Body::from(msg.to_string()))
+            },
+            Reject::JsonError(status, json) => {
+                Response::builder()
+                    .status(status)
+                    .header("content-type", "application/json")
+                    .body(Body::from(json.to_string()))
+            },
+            Reject::Unauthorized(schema) => {
+                let mut builder = Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .header("content-type", "text/plain");
+                if let Some(schema) = schema {
+                    builder = builder.header("www-authenticate", schema);
+                }
+                builder.body(Body::from("credentials missing"))
+            },
+        }.map_err(http_to_reject)?;
+        Ok(resp)
+    }
+
+    pub fn status(status: StatusCode, msg: impl Into<String>) -> Rejection {
+        warp::reject::custom(Self::Status(status, msg.into()))
+    }
+}
+
+fn http_to_reject(err: http::Error) -> Rejection {
+    let r: Reject = err.into();
+    r.into()
+}
+
+impl From<http::Error> for Reject {
+    fn from(err: http::Error) -> Reject {
+        Reject::Status(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    }
+}
+
+impl From<Reject> for Rejection {
+    fn from(reject: Reject) -> Rejection {
+        warp::reject::custom(reject)
+    }
 }
 
 // helpers.
-pub(crate) fn http_unauthorized(domain: &str, schema: Option<&String>) -> HttpResponse {
+pub(crate) fn http_unauthorized(domain: &str, schema: Option<&String>) -> Rejection {
     debug!("401 Unauthorized");
-    let mut resp = HttpResponse::Unauthorized();
-    resp.header(header::CONTENT_TYPE, "text/plain");
-    if let Some(schema) = schema {
-        let wa = if schema.as_str() == "Basic" {
+    let wa = schema.map(|schema| {
+        if schema.as_str() == "Basic" {
             format!("{} realm=\"{}\"", schema, domain)
         } else {
             schema.to_owned()
-        };
-        resp.header(header::WWW_AUTHENTICATE, wa);
-    }
-    resp.body("Unauthorized - send credentials\n")
+        }
+    });
+    warp::reject::custom(Reject::Unauthorized(wa))
 }
 
-pub(crate) fn json_error(outer_code: StatusCode, inner_code: Option<StatusCode>, msg: &str) -> HttpResponse {
+pub(crate) fn json_error(outer_code: StatusCode, inner_code: Option<StatusCode>, msg: &str) -> Rejection {
     let body = json!({
         "error": {
             "code":     inner_code.unwrap_or(outer_code.clone()).as_u16(),
@@ -57,28 +115,29 @@ pub(crate) fn json_error(outer_code: StatusCode, inner_code: Option<StatusCode>,
     });
     debug!("{}", body);
     let body = body.to_string() + "\n";
-
-    HttpResponse::build(outer_code)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(body)
+    warp::reject::custom(Reject::JsonError(outer_code, body.to_string()))
 }
 
-pub(crate) fn json_result(code: StatusCode, msg: &serde_json::Value) -> HttpResponse {
+pub(crate) fn json_result(code: StatusCode, msg: &serde_json::Value) -> WarpResult {
     let body = json!({ "result": msg });
     let body = body.to_string() + "\n";
 
-    HttpResponse::build(code)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(body)
+    Response::builder()
+        .status(code)
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .map_err(http_to_reject)
 }
 
-pub(crate) fn json_result_raw(code: StatusCode, raw: &serde_json::Value) -> HttpResponse {
+pub(crate) fn json_result_raw(code: StatusCode, raw: &serde_json::Value) -> WarpResult {
     let body = json!(raw);
     let body = body.to_string() + "\n";
 
-    HttpResponse::build(code)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(body)
+    Response::builder()
+        .status(code)
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .map_err(http_to_reject)
 }
 
 /// decode POST body into simple key/value.
@@ -164,7 +223,7 @@ pub enum AuthResult {
 }
 
 /// Check http authentication.
-pub fn check_http_auth(hdrs: &HeaderMap<HeaderValue>, domain: &config::Domain) -> AuthResult {
+pub fn check_http_auth(authz: Option<String>, domain: &config::Domain) -> AuthResult {
     // Get authschema from config. Not set? Access allowed.
     let schema = match domain.http_authschema {
         Some(ref s) => s.as_str(),
@@ -180,9 +239,9 @@ pub fn check_http_auth(hdrs: &HeaderMap<HeaderValue>, domain: &config::Domain) -
         },
     };
 
-    // find Authorization header and transform into &str
-    let hdr = match hdrs.get(header::AUTHORIZATION).map(|v| v.to_str()) {
-        Some(Ok(h)) => h,
+    // We must have an authorization header,
+    let hdr = match authz {
+        Some(h) => h,
         _ => return AuthResult::NoAuth,
     };
 

@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use actix_web::http::StatusCode;
-use actix_web::HttpResponse;
+use http::StatusCode;
 use serde::Serialize;
 use serde_json::{self, json};
 
@@ -15,6 +14,8 @@ use crate::format;
 use crate::iplist::IpList;
 use crate::lua;
 use crate::util::*;
+
+type WarpResult = Result<warp::reply::Response, warp::Rejection>;
 
 #[derive(Clone)]
 pub(crate) struct Webnis {
@@ -43,10 +44,10 @@ impl Webnis {
     // Return a JSON object with some info about this domain. Members:
     // - maps: a list of maps.
     //
-    pub fn handle_info(&self, domain: &str) -> HttpResponse {
+    pub fn handle_info(&self, domain: &str) -> WarpResult {
         // lookup domain in config
         let domain = match self.inner.config.find_domain(domain) {
-            None => return json_error(StatusCode::BAD_REQUEST, None, "Domain not found"),
+            None => return Err(json_error(StatusCode::BAD_REQUEST, None, "Domain not found")),
             Some(d) => d,
         };
 
@@ -77,22 +78,22 @@ impl Webnis {
     }
 
     // authenticate user
-    pub fn handle_auth(&self, domainname: String, ip: IpAddr, is_json: bool, body: Vec<u8>) -> HttpResponse {
+    pub fn handle_auth(&self, domainname: String, ip: IpAddr, is_json: bool, body: Vec<u8>) -> WarpResult {
         // lookup domain in config
         let domain = match self.inner.config.find_domain(&domainname) {
-            None => return json_error(StatusCode::BAD_REQUEST, None, "Domain not found"),
+            None => return Err(json_error(StatusCode::BAD_REQUEST, None, "Domain not found")),
             Some(d) => d,
         };
 
         // get username/password from POST body
         let authinfo = match AuthInfo::from_post_body(&body, is_json) {
-            None => return json_error(StatusCode::BAD_REQUEST, None, "Body parameters missing"),
+            None => return Err(json_error(StatusCode::BAD_REQUEST, None, "Body parameters missing")),
             Some(ai) => ai,
         };
 
         // Domain has "auth=x", now find auth "x" in the main config.
         let auth = match domain.auth.as_ref().and_then(|a| self.inner.config.auth.get(a)) {
-            None => return json_error(StatusCode::NOT_FOUND, None, "Authentication not enabled"),
+            None => return Err(json_error(StatusCode::NOT_FOUND, None, "Authentication not enabled")),
             Some(a) => a,
         };
 
@@ -111,17 +112,17 @@ impl Webnis {
             let res = match lua::lua_auth(self, lua_func, req) {
                 Ok((serde_json::Value::Null, status)) => {
                     if status == 0 {
-                        json_error(
+                        Err(json_error(
                             StatusCode::FORBIDDEN,
                             Some(StatusCode::UNAUTHORIZED),
                             "Login incorrect",
-                        )
+                        ))
                     } else {
-                        json_error(
+                        Err(json_error(
                             StatusCode::from_u16(status).unwrap(),
                             Some(StatusCode::UNAUTHORIZED),
                             "Login incorrect",
-                        )
+                        ))
                     }
                 },
                 Ok((val, status)) => {
@@ -131,7 +132,7 @@ impl Webnis {
                         json_result_raw(StatusCode::from_u16(status).unwrap(), &val)
                     }
                 },
-                Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Internal server error"),
+                Err(_) => Err(json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Internal server error")),
             };
             return res;
         }
@@ -141,16 +142,16 @@ impl Webnis {
         match self.auth_map(domain, auth_map, auth_key, &authinfo.username, &authinfo.password) {
             Ok(true) => json_result(StatusCode::OK, &json!({})),
             Ok(false) => {
-                json_error(
+                Err(json_error(
                     StatusCode::FORBIDDEN,
                     Some(StatusCode::UNAUTHORIZED),
                     "Login incorrect",
-                )
+                ))
             },
             Err(WnError::MapNotFound) => {
-                return json_error(StatusCode::NOT_FOUND, None, "Associated auth map not found");
+                Err(json_error(StatusCode::NOT_FOUND, None, "Associated auth map not found"))
             },
-            Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Internal server error"),
+            Err(_) => Err(json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Internal server error"))
         }
     }
 
@@ -219,10 +220,10 @@ impl Webnis {
     }
 
     // look something up in a map.
-    pub fn handle_map(&self, domain: &str, map: &str, keyname: Option<&str>, query: &HashMap<String, String>) -> HttpResponse {
+    pub fn handle_map(&self, domain: &str, map: &str, keyname: Option<&str>, query: &HashMap<String, String>) -> WarpResult {
         // lookup domain in config
         let domain = match self.inner.config.find_domain(&domain) {
-            None => return json_error(StatusCode::BAD_REQUEST, None, "Domain not found"),
+            None => return Err(json_error(StatusCode::BAD_REQUEST, None, "Domain not found")),
             Some(d) => d,
         };
 
@@ -231,15 +232,15 @@ impl Webnis {
         let (keyname, keyval) = match keyname {
             Some(k) => match query.get(k) {
                 Some(v) => (k, v),
-                None => return json_error(StatusCode::BAD_REQUEST, None, "query params garbled"),
+                None => return Err(json_error(StatusCode::BAD_REQUEST, None, "query params garbled")),
             },
-            None => return json_error(StatusCode::BAD_REQUEST, None, "query params missing"),
+            None => return Err(json_error(StatusCode::BAD_REQUEST, None, "query params missing")),
         };
 
         // find the map
         debug!("webnis.handle_map: domain [{}] map [{}] keyname [{}]", domain.name, map, keyname);
         let (map, keyname) = match self.inner.config.find_allowed_map(&domain, map, keyname) {
-            None => return json_error(StatusCode::NOT_FOUND, None, "No such map/keyname combo"),
+            None => return Err(json_error(StatusCode::NOT_FOUND, None, "No such map/keyname combo")),
             Some(m) => m,
         };
 
@@ -250,11 +251,11 @@ impl Webnis {
             MapType::None => unreachable!(),
         };
         match res {
-            Err(WnError::KeyNotFound) => json_error(StatusCode::NOT_FOUND, None, "No such key in map"),
-            Err(WnError::MapNotFound) => json_error(StatusCode::NOT_FOUND, None, "No such map"),
-            Err(WnError::UnknownFormat) => json_error(StatusCode::NOT_FOUND, None, "Unknown map format"),
-            Err(WnError::SerializeJson(_)) => json_error(StatusCode::NOT_FOUND, None, "Serialize error"),
-            Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Error reading database"),
+            Err(WnError::KeyNotFound) => Err(json_error(StatusCode::NOT_FOUND, None, "No such key in map")),
+            Err(WnError::MapNotFound) => Err(json_error(StatusCode::NOT_FOUND, None, "No such map")),
+            Err(WnError::UnknownFormat) => Err(json_error(StatusCode::NOT_FOUND, None, "Unknown map format")),
+            Err(WnError::SerializeJson(_)) => Err(json_error(StatusCode::NOT_FOUND, None, "Serialize error")),
+            Err(_) => Err(json_error(StatusCode::INTERNAL_SERVER_ERROR, None, "Error reading database")),
             Ok(r) => json_result(StatusCode::OK, &r),
         }
     }

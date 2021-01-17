@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::io;
 use std::net::Ipv4Addr;
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
-use serde::Deserialize;
+use serde::{de::Deserializer, Deserialize};
 use toml;
 
 use crate::db::{deserialize_map_type, MapType};
@@ -114,19 +114,51 @@ pub enum MapOrMaps {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum OneOrManyAddr {
-    One(SocketAddr),
-    Many(Vec<SocketAddr>),
+    One(ListenAddr),
+    Many(Vec<ListenAddr>),
 }
 
-impl ToSocketAddrs for OneOrManyAddr {
-    type Iter = std::vec::IntoIter<SocketAddr>;
-    fn to_socket_addrs(&self) -> io::Result<std::vec::IntoIter<SocketAddr>> {
-        let i = match self {
-            OneOrManyAddr::Many(ref v) => v.to_owned(),
-            OneOrManyAddr::One(ref s) => vec![*s],
-        };
-        Ok(i.into_iter())
+impl<'a> IntoIterator for &'a OneOrManyAddr {
+    type Item = (SocketAddr, String);
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            OneOrManyAddr::Many(ref v) => {
+                let v: Vec<_> = v.clone().drain(..).map(|l| l.0).collect();
+                v.into_iter()
+            },
+            OneOrManyAddr::One(ref s) => vec![s.0.clone()].into_iter(),
+        }
     }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ListenAddr(
+    #[serde(deserialize_with = "deserialize_socketaddr")]
+    (SocketAddr, String)
+);
+
+// If "addr" specifies just a port, we should add two sockaddrs: one for IPv4, one for IPv6.
+// However, right now warp doesn't know about `v6_only`, so for now just bind to
+// an IPv6 socket, which (at least on linux/freebsd) is dual-stack.
+pub fn deserialize_socketaddr<'de, D>(deserializer: D) -> Result<(SocketAddr, String), D::Error>
+where D: Deserializer<'de> {
+    let addr = String::deserialize(deserializer)?;
+    if let Ok(port) = addr.parse::<u16>() {
+        return Ok((
+            SocketAddr::new(IpAddr::V6(0u128.into()), port),
+            format!("[::]:{}", port),
+        ));
+    }
+    // "*:port" is IPv4 wildcard. "[::]:port" for IPv6.
+    let res = if addr.starts_with("*") {
+        let addr2 = addr.replacen("*", "0.0.0.0", 1);
+        (addr2.parse::<SocketAddr>().map_err(serde::de::Error::custom)?, addr)
+    } else {
+        (addr.parse::<SocketAddr>().map_err(serde::de::Error::custom)?, addr)
+    };
+	Ok(res)
 }
 
 fn map_inherit(key: &str, map: &Map, base: &Map) -> Map {
@@ -461,3 +493,5 @@ pub fn read_securenets(file: impl AsRef<Path>, iplist: &mut IpList) -> io::Resul
     iplist.finalize();
     Ok(())
 }
+
+
