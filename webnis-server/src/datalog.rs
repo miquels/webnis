@@ -38,6 +38,7 @@ impl Drop for LogGuard {
         let wait = {
             let mut guard = LOGGER.lock().unwrap();
             let logger = guard.take().unwrap();
+            let _ = logger.tx.send_blocking(LogItem::Quit);
             logger.wait
         };
         let _ = wait.recv();
@@ -89,6 +90,7 @@ struct LogWriter {
 enum LogItem {
     Item(Datalog),
     Tick,
+    Quit,
 }
 
 impl LogWriter {
@@ -212,6 +214,7 @@ impl LogWriter {
                     }
                     log_is_empty = false;
                 },
+                LogItem::Quit => break,
             }
         }
 
