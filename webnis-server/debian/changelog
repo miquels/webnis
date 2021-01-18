@@ -1,3 +1,12 @@
+webnis-server (0.6.0) stretch buster; urgency=low
+
+  * update to tokio 0.2 + warp 0.2
+  * warning: looks like tokio-rustls doesn't reckognize secp384r1 keys.
+    use a RSA key, that works. to be investigated.
+  * config: use listen to "port", not "0.0.0.0:port, [::]:port".
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Mon, 18 Jan 2021 14:16:10 +0100
+
 webnis-server (0.5.2) stretch; urgency=low
 
   * datalog.rs: detect that log stream has ended on shutdown.
