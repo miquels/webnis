@@ -71,6 +71,15 @@ fn parse(
     addr
 }
 
+fn normalize(mut sockaddr: SocketAddr) -> SocketAddr {
+    if let IpAddr::V6(ipv6) = sockaddr.ip() {
+        if let Some(ipv4) = ipv6.to_ipv4() {
+            sockaddr.set_ip(IpAddr::V4(ipv4));
+        }
+    }
+    sockaddr
+}
+
 /// Like `warp::addr::remote()` but also takes XFF into account.
 pub fn remoteip(
     do_xff: bool,
@@ -83,6 +92,6 @@ pub fn remoteip(
             move |addr: Option<SocketAddr>,
                   xff: Option<String>,
                   xri: Option<String>,
-                  fwd: Option<String>| { parse(addr, do_xff, xff, xri, fwd) },
+                  fwd: Option<String>| { parse(addr, do_xff, xff, xri, fwd).map(normalize) }
         )
 }
