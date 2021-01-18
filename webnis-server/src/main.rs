@@ -13,6 +13,7 @@ use std::panic;
 use futures::stream::FuturesUnordered;
 use http::StatusCode;
 use structopt::StructOpt;
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::stream::StreamExt;
 use tokio::task;
 use warp::Filter;
@@ -165,46 +166,71 @@ async fn async_main() {
     let routes = warp::path("webnis").or(warp::path!(".well-known" / "webnis" / ..)).unify().and(api);
     let routes = routes.recover(Reject::handle_rejection);
 
-    let mut handles = Vec::new();
-    for (addr, name) in &config.server.listen {
-        if config.server.tls {
-            // why no try_bind_ephemeral in the TlsServer?
-            let srv = warp::serve(routes.clone());
-            let srv = srv
-                .tls()
-                .key_path(config.server.key_file.as_ref().unwrap())
-                .cert_path(config.server.crt_file.as_ref().unwrap())
-                .bind(addr);
-            log::info!("Listening on {}", name);
-            handles.push(task::spawn(srv));
-        } else {
-            match warp::serve(routes.clone()).try_bind_ephemeral(addr) {
-                Ok((_, srv)) => {
-                    log::info!("Listening on {}", name);
-                    handles.push(task::spawn(srv));
-                }
-                Err(e) => die!(log => "{}: {}", name, e),
-            }
-        }
-    }
-
     // start db housekeeping task.
     db::Timer::start_timer().await;
 
-    // The tasks should never return, only on error. So _if_ one
-    // returns, abort the entire process.
-    let mut task_waiter = FuturesUnordered::new();
-    for handle in handles.drain(..) {
-        task_waiter.push(handle);
-    }
-    if let Some(Err(err)) = task_waiter.next().await {
-        if let Ok(cause) = err.try_into_panic() {
-            if let Some(err) = cause.downcast_ref::<String>() {
-                die!(log => "fatal: {}", err);
+    // listener for SIGTERM / SIGHUP etc.
+    let sig_listener = SigListener::new().await.unwrap_or_else(|e| {
+        die!(log => "installing signal handlers: {}", e);
+    });
+
+    loop {
+        let mut sl = sig_listener.lock().await;
+
+        // start a server for each listen address.
+        let mut handles = Vec::new();
+        for (addr, name) in &config.server.listen {
+            let signal = sl.add_listener();
+            if config.server.tls {
+                // why no try_bind in the TlsServer?
+                let srv = warp::serve(routes.clone());
+                let (_, srv) = srv
+                    .tls()
+                    .key_path(config.server.key_file.as_ref().unwrap())
+                    .cert_path(config.server.crt_file.as_ref().unwrap())
+                    .bind_with_graceful_shutdown(addr, signal);
+                log::info!("Listening on {}", name);
+                handles.push(task::spawn(srv));
+            } else {
+                match warp::serve(routes.clone()).try_bind_with_graceful_shutdown(addr, signal) {
+                    Ok((_, srv)) => {
+                        log::info!("Listening on {}", name);
+                        handles.push(task::spawn(srv));
+                    }
+                    Err(e) => die!(log => "{}: {}", name, e),
+                }
             }
         }
+        drop(sl);
+
+        // Wait for tasks to finish.
+        let mut task_waiter = FuturesUnordered::new();
+        for handle in handles.drain(..) {
+            task_waiter.push(handle);
+        }
+        let mut sl = None;
+
+        while let Some(status) = task_waiter.next().await {
+            if sl.is_none() {
+                // As soon as the first task finishes, lock the sig_listener.
+                sl.get_or_insert(sig_listener.lock().await);
+            }
+            // On error just exit.
+            if let Err(err) = status {
+                if let Ok(cause) = err.try_into_panic() {
+                    if let Some(err) = cause.downcast_ref::<String>() {
+                        die!(log => "fatal: {}", err);
+                    }
+                }
+                die!(log => "server exited unexpectedly");
+            }
+        }
+
+        // If this was _not_ a SIGHUP, exit.
+        if !sl.unwrap().got_sighup {
+            break;
+        }
     }
-    die!(log => "server exited unexpectedly");
 }
 
 fn main() {
@@ -226,6 +252,68 @@ fn main() {
         .build()
         .unwrap();
     rt.block_on(async_main());
+}
+
+use std::future::Future;
+use std::io;
+use std::sync::Arc;
+use tokio::sync::{Mutex, oneshot};
+
+struct SigListener {
+    listeners: Vec<oneshot::Sender<()>>,
+    got_sighup: bool,
+}
+
+impl SigListener {
+    async fn new() -> io::Result<Arc<Mutex<SigListener>>> {
+
+        let mut sig_hup = signal(SignalKind::hangup())?;
+        let mut sig_int = signal(SignalKind::interrupt())?;
+        let mut sig_quit = signal(SignalKind::quit())?;
+        let mut sig_term = signal(SignalKind::terminate())?;
+
+        let listener = Arc::new(Mutex::new(SigListener {
+            listeners: Vec::new(),
+            got_sighup : false,
+        }));
+        let listener_ = listener.clone();
+
+        task::spawn(async move {
+            loop {
+                let mut got_sighup = false;
+                tokio::select! {
+                    _ = sig_hup.recv() => {
+                        log::info!("got SIGHUP, restarting http server");
+                        got_sighup = true;
+                    }
+                    _ = sig_int.recv() => {
+                        log::info!("got SIGINT, exiting")
+                    }
+                    _ = sig_quit.recv() => {
+                        log::info!("got SIGQUIT, exiting")
+                    }
+                    _ = sig_term.recv() => {
+                        log::info!("got SIGTERM, exiting")
+                    }
+                }
+                let mut this = listener.lock().await;
+                this.got_sighup = got_sighup;
+                for l in this.listeners.drain(..) {
+                    // signal the server to start graceful shutdown.
+                    let _ = l.send(());
+                }
+            }
+        });
+
+        Ok(listener_)
+    }
+
+    fn add_listener(&mut self) -> impl Future<Output = ()> + Send + 'static {
+        use futures::future::FutureExt;
+        let (tx, rx) = oneshot::channel();
+        self.listeners.push(tx);
+        rx.map(|_| ())
+    }
 }
 
 // Authorize the request.
