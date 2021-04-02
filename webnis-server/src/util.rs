@@ -95,11 +95,12 @@ impl From<http::Error> for Reject {
     }
 }
 
+/*
 impl From<Reject> for Rejection {
     fn from(reject: Reject) -> Rejection {
         warp::reject::custom(reject)
     }
-}
+}*/
 
 // helpers.
 pub(crate) fn http_unauthorized(domain: &str, schema: Option<&String>) -> Rejection {

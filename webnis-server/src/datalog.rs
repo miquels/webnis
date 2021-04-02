@@ -121,7 +121,7 @@ impl LogWriter {
         // Every second, send a LogItem::Tick.
         task::spawn(async move {
             loop {
-                time::delay_for(Duration::from_millis(1000)).await;
+                time::sleep(Duration::from_millis(1000)).await;
                 if let Err(_) = log_tx.send(LogItem::Tick).await {
                     break;
                 }

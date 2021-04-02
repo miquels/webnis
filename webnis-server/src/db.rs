@@ -40,7 +40,7 @@ impl Timer {
     pub async fn start_timer() {
         task::spawn(async {
             loop {
-                time::delay_for(Duration::from_millis(942)).await;
+                time::sleep(Duration::from_millis(942)).await;
                 Timer::interval();
             }
         });

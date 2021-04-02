@@ -14,7 +14,7 @@ use futures::stream::FuturesUnordered;
 use http::StatusCode;
 use structopt::StructOpt;
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::stream::StreamExt;
+use tokio_stream::StreamExt;
 use tokio::task;
 use warp::Filter;
 
@@ -237,8 +237,7 @@ fn main() {
     let env = env_logger::Env::default().default_filter_or("info");
     env_logger::init_from_env(env);
 
-    let mut rt = tokio::runtime::Builder::new()
-        .threaded_scheduler()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .on_thread_start(|| {
             let hook = panic::take_hook();
