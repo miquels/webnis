@@ -37,6 +37,12 @@ thread_local! {
     static LUA: RefCell<LuaState> = RefCell::new(local_lua_init());
 }
 
+// One syslog instance per thread.
+type SysLogger = syslog::Logger<syslog::LoggerBackend, syslog::Formatter3164>;
+thread_local! {
+    static LOG: RefCell<Option<SysLogger>> = RefCell::new(None);
+}
+
 lazy_static! {
     static ref LUA_MASTER: Mutex<Option<LuaMaster>> = Mutex::new(None);
 }
@@ -62,6 +68,33 @@ fn local_lua_init() -> LuaState {
     }
 
     LuaState { lua: lua, did_init: false }
+}
+
+fn do_syslog(msg: &str) {
+    LOG.with(|log| {
+        let mut log = log.borrow_mut();
+
+        if let Some(l) = log.as_mut() {
+            let _ = l.info(msg);
+            return;
+        }
+
+        let formatter = syslog::Formatter3164 {
+            facility: syslog::Facility::LOG_DAEMON,
+            hostname: None,
+            process: "webnis-server".into(),
+            pid: 0,
+        };
+        match syslog::unix(formatter) {
+            Ok(mut l) => {
+                let _ = l.info(msg);
+                *log = Some(l);
+            },
+            Err(e) => {
+                eprintln!("webnis-server: could not connect to syslog: {}", e);
+            },
+        }
+    })
 }
 
 /// Read the lua script from a file, and evaluate it. If it does evaluate
@@ -526,5 +559,14 @@ fn set_globals(ctx: rlua::Context) {
         })
         .unwrap();
     globals.set("dprint", dprint).unwrap();
+
+    // add a syslog logging function.
+    let logprint = ctx
+        .create_function(|_, data: String| {
+            do_syslog(&data);
+            Ok(())
+        })
+        .unwrap();
+    globals.set("logprint", logprint).unwrap();
 }
 
