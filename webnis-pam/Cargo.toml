@@ -1,11 +1,12 @@
 [package]
 name = "webnis-pam"
-version = "0.1.0"
+version = "0.3.0"
 authors = ["mikevs <mikevs@xs4all.net>"]
+edition = "2018"
 
 [dependencies]
 percent-encoding = "1.0.1"
-pamsm = "0.2.0"
+pamsm = { version = "0.5.0", features = [ "libpam" ], git = "https://github.com/miquels/pam_sm_rust" }
 
 [lib]
 name = "pam_webnis"

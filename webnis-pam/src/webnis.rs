@@ -10,8 +10,7 @@ use percent_encoding::{
     QUERY_ENCODE_SET
 };
 
-use pamsm::{self,PamServiceModule,PamError};
-use pamsm::pam_raw::{get_item, PamHandle, PamItemType, PamResult};
+use pamsm::{Pam, PamError, PamFlags, PamLibExt, PamServiceModule};
 
 static SOCKADDR: &'static str = "/var/run/webnis-bind.sock";
 
@@ -47,7 +46,7 @@ impl PamArgs {
 pub struct Webnis;
 
 impl PamServiceModule for Webnis {
-    fn authenticate(self: &Self, pam: pamsm::Pam, _pam_flags: pamsm::PamFlag, args: Vec<String>) -> PamError {
+    fn authenticate(pam: Pam, _pam_flags: PamFlags, args: Vec<String>) -> PamError {
 
         // config file cmdline args.
         let pam_args = PamArgs::parse(&args);
@@ -77,7 +76,7 @@ impl PamServiceModule for Webnis {
         }
 
         // The service name should always be present.
-        let service = match get_service(&pam) {
+        let service = match pam.get_service() {
             Ok(Some(s)) => match s.to_str() {
                 Ok(s) => s,
                 Err(_) => return PamError::AUTH_ERR,
@@ -169,7 +168,7 @@ fn wnbind_try(user: &str, pass: &str, service: &str, remote: Option<&str>, _debu
     };
 
     match code {
-        200 ... 299 => {
+        200 ..= 299 => {
             Ok(())
         },
 		401|403|404 => {
@@ -213,22 +212,3 @@ fn from_io_error(e: std::io::Error) -> PamError {
         _ => PamError::AUTH_ERR,
     }
 }
-
-use std::os::raw::c_char;
-use std::ffi::CStr;
-
-// "struct Pam" is exactly this, but we can't get at the internal
-// PamHandle to call get_item with it. So we transmute the reference
-// to struct Pam to a reference to struct Pam2 here.
-struct Pam2(PamHandle);
-
-// missing implementation in pamsm, so define it here.
-fn get_service(pam: &pamsm::Pam) -> PamResult<Option<&CStr>> {
-    // Yuck. Should open an issue with pamsm.
-    let pam = unsafe { std::mem::transmute::<_, &Pam2>(pam) };
-    let pointer = get_item(pam.0, PamItemType::SERVICE)?;
-    unsafe {
-        Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
-    }
-}
-

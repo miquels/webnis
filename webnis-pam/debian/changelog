@@ -1,3 +1,9 @@
+webnis-pam (0.3) buster bullseye; urgency=low
+
+  * rebuild against latest `pamsm` crate.
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Wed, 23 Mar 2022 20:44:37 +0100
+
 webnis-pam (0.2) stretch; urgency=low
 
   * initial release

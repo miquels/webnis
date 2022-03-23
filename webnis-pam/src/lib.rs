@@ -1,8 +1,7 @@
-#[macro_use] extern crate pamsm;
-extern crate percent_encoding;
+use pamsm::{PamServiceModule, PamFlags};
 
 mod webnis;
 pub use webnis::Webnis;
 
-pamsm_init!(Box::new(Webnis));
+pamsm::pam_module!(Webnis);
 
