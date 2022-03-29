@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 percent-encoding = "1.0.1"
-pamsm = { version = "0.5.0", features = [ "libpam" ], git = "https://github.com/miquels/pam_sm_rust" }
+pamsm = { version = "0.5.1", features = [ "libpam" ] }
 
 [lib]
 name = "pam_webnis"
